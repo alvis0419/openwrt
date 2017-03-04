@@ -1,0 +1,6 @@
+99057768b0d630d402519ce8b261bb5c *OpenWrt-Toolchain-malta-le_gcc-4.8-linaro_uClibc-0.9.33.2.Linux-x86_64.tar.bz2
+d8f43ba51730d842cc84e42abd4bc1da *openwrt-malta-le-uImage-gzip
+caae4cc4fc960354b6a77f5eec3cef4b *openwrt-malta-le-uImage-lzma
+5f0b2f983ff5dff22300030bc815a595 *openwrt-malta-le-vmlinux-initramfs.bin
+8c163ab03d23eb10586ac73df26ee26a *openwrt-malta-le-vmlinux-initramfs.elf
+ddd1fbf391c260faa64cccd4eca730d7 *openwrt-malta-le-vmlinux.elf

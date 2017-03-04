@@ -1,0 +1,7 @@
+SHA256(OpenWrt-Toolchain-malta-le_gcc-4.8-linaro_uClibc-0.9.33.2.Linux-x86_64.tar.bz2)= 336c443cb345695803815db4b1fd570b6937ffe7a52368cb7330370c968d7a99
+SHA256(openwrt-malta-le-uImage-gzip)= 05967bab305b90d483b2daec917a6c81ac1fd9b28c3307e10dbe71daf118c9d3
+SHA256(openwrt-malta-le-uImage-lzma)= 1ad62c477fd19dc3fef3087c394ae269db7f2c34951d935392b76ed22c3b30bc
+SHA256(openwrt-malta-le-vmlinux-initramfs.bin)= a4c294ad9b9d47cbffdcc9d07b8dd683d7710de4898e8e13ca31df4340310332
+SHA256(openwrt-malta-le-vmlinux-initramfs.elf)= 35525f6b9370600e779004ca79db8b0e430807c3d97a680229f0fe276ca99c5e
+SHA256(openwrt-malta-le-vmlinux.elf)= 69bd3e4504773813ab0753ae056f653b4c675433548528315e389bfe87e30444
+SHA256(sha256sums)= e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
