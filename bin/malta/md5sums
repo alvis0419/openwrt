@@ -1,6 +1,8 @@
 99057768b0d630d402519ce8b261bb5c *OpenWrt-Toolchain-malta-le_gcc-4.8-linaro_uClibc-0.9.33.2.Linux-x86_64.tar.bz2
-d8f43ba51730d842cc84e42abd4bc1da *openwrt-malta-le-uImage-gzip
-caae4cc4fc960354b6a77f5eec3cef4b *openwrt-malta-le-uImage-lzma
-5f0b2f983ff5dff22300030bc815a595 *openwrt-malta-le-vmlinux-initramfs.bin
-8c163ab03d23eb10586ac73df26ee26a *openwrt-malta-le-vmlinux-initramfs.elf
-ddd1fbf391c260faa64cccd4eca730d7 *openwrt-malta-le-vmlinux.elf
+d9f0aa18548639dcaee9374f2a5bfc98 *openwrt-malta-le-rootfs.tar.gz
+8982bb26c68927fd42d7bab63fd67832 *openwrt-malta-le-uImage-gzip
+727d93f61cb1015e18be4a5f5582e816 *openwrt-malta-le-uImage-lzma
+629eda95815c85899f34cb6522b8718b *openwrt-malta-le-vmlinux-initramfs.bin
+680d17203edbcdf7a3da302bdc273022 *openwrt-malta-le-vmlinux-initramfs.elf
+dc6d5759feeff50e3803c72e434acd64 *openwrt-malta-le-vmlinux.elf
+e76445de1ceef9ef0df9257326a7f639 *sha256sums
