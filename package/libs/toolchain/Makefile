@@ -448,6 +448,7 @@ ifeq ($(CONFIG_EXTERNAL_TOOLCHAIN),)
 		$(TOOLCHAIN_DIR)/lib/ld*-uClibc.so.* \
 		$(TOOLCHAIN_DIR)/lib/ld*-uClibc-$(LIBC_SO_VERSION).so \
 		$(1)/lib/
+	$(CP) $(TOOLCHAIN_DIR)/lib/ld*-uClibc.so.* $(1)/lib/
 	$(CP) \
 		$(TOOLCHAIN_DIR)/lib/libc.so.* \
 		$(TOOLCHAIN_DIR)/lib/libuClibc-$(LIBC_SO_VERSION).so \

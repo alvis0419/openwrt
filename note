@@ -1,5 +1,5 @@
 
 export PATH=/workplace3/openwrt/toolchain-mipsel_mips32_gcc-4.8-linaro_uClibc-0.9.33.2/bin:$PATH
 
-qemu-system-mipsel -kernel bin/malta/openwrt-malta-le-vmlinux-initramfs.elf -nographic -m 256
+./qemu-system-mipsel -kernel bin/malta/openwrt-malta-le-vmlinux-initramfs.elf -nographic -m 256
 
