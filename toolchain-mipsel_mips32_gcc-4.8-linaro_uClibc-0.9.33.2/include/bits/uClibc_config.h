@@ -7,7 +7,7 @@
 #define __UCLIBC_SUBLEVEL__ 33
 /* Automatically generated make config: don't edit */
 /* Version: 0.9.33.2 */
-/* Sun Mar  5 01:21:05 2017 */
+/* Sun Mar  5 14:46:49 2017 */
 #undef __TARGET_alpha__
 #undef __TARGET_arm__
 #undef __TARGET_avr32__
@@ -63,7 +63,7 @@
 #define __DO_C99_MATH__ 1
 #undef __DO_XSI_MATH__
 #undef __UCLIBC_HAS_FENV__
-#define __KERNEL_HEADERS__ "/workplace3/openwrt/build_dir/toolchain-mipsel_mips32_gcc-4.8-linaro_uClibc-0.9.33.2/linux-dev/include"
+#define __KERNEL_HEADERS__ "/workplace/openwrt/build_dir/toolchain-mipsel_mips32_gcc-4.8-linaro_uClibc-0.9.33.2/linux-dev/include"
 #define __HAVE_DOT_CONFIG__ 1
 
 /* General Library Settings */
