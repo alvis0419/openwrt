@@ -1,0 +1,36 @@
+diff -bur a/login-utils/Makemodule.am b/login-utils/Makemodule.am
+--- a/login-utils/Makemodule.am	2014-09-16 20:37:06.173552014 +0800
++++ b/login-utils/Makemodule.am	2017-03-05 13:20:52.879189728 +0800
+@@ -5,7 +5,7 @@
+ 	login-utils/last.1 \
+ 	login-utils/lastb.1
+ last_SOURCES = login-utils/last.c lib/boottime.c
+-last_LDADD = $(LDADD) libcommon.la -lrt
++last_LDADD = $(LDADD) libcommon.la -lrt -lpthread -ldl
+ 
+ install-exec-hook-last:
+ 	cd $(DESTDIR)$(usrbin_execdir) && ln -sf last lastb
+diff -bur a/sys-utils/Makemodule.am b/sys-utils/Makemodule.am
+--- a/sys-utils/Makemodule.am	2014-10-24 17:21:20.000000000 +0800
++++ b/sys-utils/Makemodule.am	2017-03-05 13:04:25.939138432 +0800
+@@ -72,7 +72,7 @@
+ bin_PROGRAMS += dmesg
+ dist_man_MANS += sys-utils/dmesg.1
+ dmesg_SOURCES = sys-utils/dmesg.c lib/boottime.c
+-dmesg_LDADD = $(LDADD) libcommon.la -lrt
++dmesg_LDADD = $(LDADD) libcommon.la -lrt -lpthread -ldl
+ endif
+ 
+ if BUILD_CTRLALTDEL
+diff -bur a/text-utils/Makemodule.am b/text-utils/Makemodule.am
+--- a/text-utils/Makemodule.am	2014-09-16 20:37:06.368553875 +0800
++++ b/text-utils/Makemodule.am	2017-03-05 13:08:53.035152314 +0800
+@@ -34,7 +34,7 @@
+ 	text-utils/hexdump.c \
+ 	text-utils/hexdump.h \
+ 	text-utils/hexdump-parse.c
+-hexdump_LDADD = $(LDADD) libcommon.la
++hexdump_LDADD = $(LDADD) libcommon.la -lrt -lpthread -ldl
+ endif
+ 
+ if BUILD_REV
