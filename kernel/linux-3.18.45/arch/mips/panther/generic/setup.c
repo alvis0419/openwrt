@@ -33,7 +33,9 @@ extern void cheetah_reboot_setup(void);
 extern void sram_init(void);
 void __init plat_mem_setup(void)
 {
+#if defined(CONFIG_TODO)
 	sram_init();
+#endif
 
 #ifdef CONFIG_DMA_COHERENT
 #error CONFIG_DMA_COHERENT not applicable!

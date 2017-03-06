@@ -166,23 +166,6 @@ config CHEETAH_4M_JFFS2
 		This enable to reserve 4M jffs2. 
 
 
-choice
-	prompt "Select Sniffer Mode "
-	default CHEETAH_SMART_CONFIG
-
-config CHEETAH_SMART_CONFIG
-	bool "Cheetah Smart Config"
-	depends on CHEETAH
-	help
-		This enable cheetah smart config. 
-
-config CHEETAH_SMART_TO_USRSPACE
-    bool "Sniffer to User Space"
-    depends on CHEETAH
-
-endchoice
-
-
 config CHEETAH_HW_TIMER
 	bool "Cheetah HW TIMER"
 	depends on CHEETAH && NO_HZ 
@@ -190,83 +173,10 @@ config CHEETAH_HW_TIMER
 	help
 		This enable hw to write delta time in the next event for CONFIG_NO_HZ enable.
 
-config CHEETAH_WLA
-	tristate "Cheetah WLAN driver"
-	depends on CHEETAH
-	#select MAC80211
-	#select WLAN_80211
-
 config CHEETAH_WLAN
 	bool "Dragonite WLAN driver"
-	default n
-
-config LINUX_WLA
-	bool "Linux WLA Code"
-	depends on CHEETAH_WLA
-	default y
-
-config WLA_WAPI
-	bool "Cheetah WAPI Support"
-	depends on CHEETAH_WLA
-	default y
-
-config WLA_UAPSD
-	bool "Unscheduled automatic power save delivery support"
-	depends on CHEETAH_WLA
-	default y
-
-config WLA_HW_AMPDU_RX
-	bool "Cheetah WiFi AMPDU RX"
-	depends on CHEETAH_WLA
-	default y
-
-config WLA_UNIVERSAL_REPEATER
-	bool "Cheetah WiFi UNIVERSAL REPEATER Support"
-	depends on CHEETAH_WLA
-	default y
-
-config MAT_NO_FLUSH_ENTRY_FROM_DHCP
-	bool "Don't Del the MAT Entry Added by DHCP Info"
-	depends on WLA_UNIVERSAL_REPEATER
-	default y
-
-config WLA_DEBUG
-	bool "WiFi debugging"
-	depends on CHEETAH_WLA
-	---help---
-	  Say Y, if you need WiFi Driver to display debug messages.
-	  Pass the debug mask as a module parameter:
-
-config WLA_P2P
-	bool "Cheetah WiFi P2P Support"
-	depends on CHEETAH_WLA
-	default n
-
-config WMAC_RECOVER
-	bool "Cheetah WiFi MAC Recovery"
-	depends on CHEETAH_WLA
-	default y
-
-config MONTAGE_APCLIENT
-	bool "Montage AP Client Feature"
-	depends on CHEETAH
-	default y
-	---help---
-	patch kernel to let WISP mode work
-
-config MONTAGE_HW_REPORT_TX_ACK
-	bool "Montage REPORT HW ACK STATUS"
 	depends on CHEETAH
 	default n
-	---help---
-	Say Y if use nullfunc to keep alive, otherwise use probe req
-
-config MONTAGE_HIDDEN_SSID
-	bool "Montage Patch the Hidden SSID Support for STA Role"
-	depends on CHEETAH
-	default y
-	---help---
-	Say Y if support to connect to hidden ssid AP
 
 config CHEETAH_ETH
 	bool "Cheetah Ethernet"
@@ -427,8 +337,6 @@ config CHEETAH_SND_PCM0_TLV320AIC3111
 	bool "Texas Instruments TLV320AIC31xx CODECs"
 	select I2C
 	select MONTAGE_I2C
-	select REGMAP
-	select REGMAP_I2C
 
 config CHEETAH_SND_PCM0_WM8750
 	bool "Wolfson WM8750"
@@ -795,178 +703,6 @@ config CHEETAH_GI2C_SDA_GPIO_NUM
 	depends on CHEETAH_GI2C
 	default 15
 
-config CHEETAH_LEDGPIO
-	bool "Cheetah LED GPIO"
-	depends on CHEETAH
-	select NEW_LEDS
-	select LEDS_CLASS
-	select GENERIC_GPIO
-	select LEDS_GPIO
-	default n
-config CHEETAH_LEDGPIO_00
-	bool "Cheetah LED GPIO00"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_01
-	bool "Cheetah LED GPIO01"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_02
-	bool "Cheetah LED GPIO02"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_03
-	bool "Cheetah LED GPIO03"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_04
-	bool "Cheetah LED GPIO04"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_05
-	bool "Cheetah LED GPIO05"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_06
-	bool "Cheetah LED GPIO06"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_07
-	bool "Cheetah LED GPIO07"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_08
-	bool "Cheetah LED GPIO08"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_09
-	bool "Cheetah LED GPIO09"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_10
-	bool "Cheetah LED GPIO10"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_11
-	bool "Cheetah LED GPIO11"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_12
-	bool "Cheetah LED GPIO12"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_13
-	bool "Cheetah LED GPIO13"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_14
-	bool "Cheetah LED GPIO14"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_15
-	bool "Cheetah LED GPIO15"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_16
-	bool "Cheetah LED GPIO16"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_17
-	bool "Cheetah LED GPIO17"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_18
-	bool "Cheetah LED GPIO18"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_19
-	bool "Cheetah LED GPIO19"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_20
-	bool "Cheetah LED GPIO20"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_21
-	bool "Cheetah LED GPIO21"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_22
-	bool "Cheetah LED GPIO22"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_23
-	bool "Cheetah LED GPIO23"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_24
-	bool "Cheetah LED GPIO24"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_25
-	bool "Cheetah LED GPIO25"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_26
-	bool "Cheetah LED GPIO26"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_27
-	bool "Cheetah LED GPIO27"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_28
-	bool "Cheetah LED GPIO28"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_29
-	bool "Cheetah LED GPIO29"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_30
-	bool "Cheetah LED GPIO30"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_31
-	bool "Cheetah LED GPIO31"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_32
-	bool "Cheetah LED GPIO32"
-	depends on CHEETAH_LEDGPIO
-	default n
-config CHEETAH_LEDGPIO_33
-	bool "Cheetah LED GPIO33"
-	depends on CHEETAH_LEDGPIO
-	default n
-
-config LEDS_TRIGGER_CTAINTF
-	bool "LED Network Interface Trigger for Cheetah"
-	select NEW_LEDS
-	select LEDS_TRIGGERS
-	default n
-
-config CHEETAH_GPIO_ROTARY_ENCODER
-	bool "Cheetah GPIO Rotary encoders"
-	select INPUT
-	select GPIOLIB
-	select GENERIC_GPIO
-	depends on CHEETAH && !CHEETAH_GVCOM
-	default n
-	help
-	  Say Y here to add support for rotary encoders connected to GPIO lines.
-
-config CHEETAH_ROTARY_ENCODER_GPIO_A
-	int "GPIO Number for Rotary Encoder pin A (0~29)"
-	range 0 29
-	depends on CHEETAH_GPIO_ROTARY_ENCODER
-	default 13
-config CHEETAH_ROTARY_ENCODER_GPIO_B
-	int "GPIO Number for Rotary Encoder pin B (0~29)"
-	range 0 29
-	depends on CHEETAH_GPIO_ROTARY_ENCODER
-	default 19
-
 config CHEETAH_UART_BAUDRATE
 	int "UART Baud Rate"
 	depends on CHEETAH
@@ -982,14 +718,6 @@ config MONTAGE_I2C
         depends on I2C
         default y
 		
-config REGMAP
-	bool "REGMAP"
-	default n
-
-config REGMAP_I2C
-	bool "REGMAP_I2C"
-	default y
-
 config MONTAGE_WATCHDOG
         bool "Watchdog Timer support"
         depends on WATCHDOG
