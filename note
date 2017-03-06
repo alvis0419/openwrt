@@ -3,3 +3,9 @@ export PATH=/workplace3/openwrt/toolchain-mipsel_mips32_gcc-4.8-linaro_uClibc-0.
 
 ./qemu-system-mipsel -kernel bin/panther/openwrt-panther-le-vmlinux-initramfs.elf -nographic -m 256
 
+#make and test kernel only
+
+kernel/linux-3.18.45
+STAGING_DIR=/workplace3/openwrt/toolchain-mipsel_mips32_gcc-4.8-linaro_uClibc-0.9.33.2
+make CROSS_COMPILE=mipsel-openwrt-linux- -j8
+../../qemu-system-mipsel -kernel vmlinux -nographic -m 256
