@@ -109,7 +109,6 @@ static int pdma_enabled(int idx)
 struct serial_state
 {
     char devname[16];
-    struct device *dev;
 	struct tty_port	tport;
     int baud_base;
     unsigned long port;
@@ -138,11 +137,8 @@ struct serial_state
 
     int         read_status_mask;
     int         timeout;
-    int         quot;
     int         x_char; /* xon/xoff character */
-    int         MCR;    /* Modem control register */
     unsigned long       last_active;
-    int         blocked_open; /* # of blocked opens */
     struct circ_buf     xmit;
 };
 
@@ -1957,13 +1953,11 @@ static int __init cheetah_rs_init(void)
     serial_driver->init_termios = tty_std_termios;
     serial_driver->init_termios.c_cflag =
     B115200 | CS8 | CREAD | HUPCL | CLOCAL;
-    serial_driver->flags = TTY_DRIVER_REAL_RAW | TTY_DRIVER_DYNAMIC_DEV;
+    serial_driver->flags = TTY_DRIVER_REAL_RAW;
     tty_set_operations(serial_driver, &serial_ops);
 
     for (i=0;i<NR_PORTS;i++)
     {
-        //tty_register_device(serial_driver, i, NULL);
-
         state = &rs_table[i];
         state->line = i;
         state->custom_divisor = 0;
@@ -2021,7 +2015,6 @@ static int __init cheetah_rs_init(void)
         spin_unlock_irqrestore(&uart_lock, flags);
 
         tty_name[4] = '0' + i;
-        state->dev = device_create(rs_class, NULL, MKDEV(TTY_MAJOR, (64 + i)), NULL, (const char *)tty_name);
     }
 
     if (tty_register_driver(serial_driver))
