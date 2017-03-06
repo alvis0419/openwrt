@@ -6,6 +6,6 @@ export PATH=/workplace3/openwrt/toolchain-mipsel_mips32_gcc-4.8-linaro_uClibc-0.
 #make and test kernel only
 
 kernel/linux-3.18.45
-STAGING_DIR=/workplace3/openwrt/toolchain-mipsel_mips32_gcc-4.8-linaro_uClibc-0.9.33.2
+export STAGING_DIR=/workplace3/openwrt/toolchain-mipsel_mips32_gcc-4.8-linaro_uClibc-0.9.33.2
 make CROSS_COMPILE=mipsel-openwrt-linux- -j8
 ../../qemu-system-mipsel -kernel vmlinux -nographic -m 256
