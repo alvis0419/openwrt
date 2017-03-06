@@ -382,7 +382,7 @@ void __init arch_init_irq(void)
         irq_set_chip_and_handler_name(i,
                                       &panther_irq_type,
                                       handle_level_irq,
-                                      "level");
+                                      NULL);
     }
 
     setup_irq(PANTHER_CASCADE_IRQ, &cascade);
