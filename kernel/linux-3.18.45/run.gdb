@@ -11,4 +11,4 @@ target remote localhost:3333
 mon halt
 load
 set *(unsigned long *)0xbf005520=0x80000500
-c
+#c
