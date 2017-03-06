@@ -1,0 +1,10 @@
+Package: kmod-pcnet32
+Version: 3.18.45-1
+Depends: kernel (=3.18.45-1-776f40cf378211cc7fc0be7a94d870fc), kmod-mii
+Source: package/kernel/linux
+License: GPLv2
+Section: kernel
+Status: unknown hold not-installed
+Architecture: panther_mipsel
+Installed-Size: 17259
+Description:  Kernel modules for AMD PCnet32 Ethernet adapters

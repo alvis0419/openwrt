@@ -1,0 +1,2 @@
+/etc/modules.d/pcnet32
+/lib/modules/3.18.45/pcnet32.ko

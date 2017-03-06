@@ -1,0 +1,10 @@
+Package: kernel
+Version: 3.18.45-1-776f40cf378211cc7fc0be7a94d870fc
+Depends: libc
+Source: package/kernel/linux
+License: GPLv2
+Section: sys
+Status: unknown hold not-installed
+Architecture: panther_mipsel
+Installed-Size: 105
+Description:  Virtual kernel package
