@@ -19,6 +19,7 @@ platforms += mti-malta
 platforms += mti-sead3
 platforms += netlogic
 platforms += paravirt
+platforms += panther
 platforms += pmcs-msp71xx
 platforms += pnx833x
 platforms += ralink

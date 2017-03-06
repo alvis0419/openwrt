@@ -1,0 +1,8 @@
+#
+# Panther board
+#
+platform-$(CONFIG_CHEETAH)	+= panther/
+cflags-$(CONFIG_CHEETAH)	+= -I$(srctree)/arch/mips/include/asm/mach-cheetah
+load-$(CONFIG_CHEETAH)	        += 0xffffffff80000500
+all-$(CONFIG_CHEETAH)	        := $(COMPRESSION_FNAME).bin
+
