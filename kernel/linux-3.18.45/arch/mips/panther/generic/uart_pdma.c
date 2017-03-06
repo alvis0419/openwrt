@@ -174,7 +174,7 @@ static DEFINE_SPINLOCK(uart_lock);
 
 #define URCS_CTRL_MASK   (~((unsigned int)(1<<URCS_BRSHFT)-1)|URCS_TIE|URCS_RIE|URCS_PE|URCS_EVEN)
 
-u32 urcs_cal_baud_cnt(u32 baudrate)
+unsigned int urcs_cal_baud_cnt(u32 baudrate)
 {   
     u32 retval;
 
@@ -252,7 +252,7 @@ static int transmit_chars(int idx);
 static void uart_tx_pdma_init(int idx)
 {
     int i;
-    int *p = (int *) (UR_BASE + (0x100 * idx));
+    unsigned int *p = (unsigned int *) (UR_BASE + (0x100 * idx));
     pdma_descriptor descriptor;
 
     rs_table[idx].pdma_tx_buf_idx = 0;
@@ -292,7 +292,7 @@ static void uart_tx_pdma_done(u32 channel, u32 intr_status)
 
 static void uart_rx_pdma_start(int idx)
 {
-    int *p = (int *) (UR_BASE + (0x100 * idx));
+    unsigned int *p = (unsigned int *) (UR_BASE + (0x100 * idx));
     int i;
     pdma_descriptor descriptor;    
 
@@ -571,7 +571,7 @@ unsigned char next_ch;
 static void receive_chars(int idx, struct async_struct *info)
 {
     unsigned char ch, flag;
-    volatile int *p = (int *) (UR_BASE + (0x100 * idx));
+    volatile unsigned int *p = (unsigned int *) (UR_BASE + (0x100 * idx));
     struct  async_icount *icount;
     //int rx_loop = 0;
     int ubr;
@@ -672,7 +672,7 @@ static void receive_chars(int idx, struct async_struct *info)
 static int transmit_chars(int idx)
 {
     struct async_struct *info = rs_table[idx].info;
-    volatile int *p = (int *) (UR_BASE + (0x100 * idx));
+    volatile int *p = (unsigned int *) (UR_BASE + (0x100 * idx));
     int enable_tx_intr = 0;
 
     for (;;)
@@ -821,7 +821,7 @@ static void uart_tx_pdma_task(unsigned long idx)
 
 static void cta_uart_deliver(unsigned long idx)
 {
-    volatile int *p = (int *) (UR_BASE + (0x100 * idx));
+    volatile int *p = (unsigned int *) (UR_BASE + (0x100 * idx));
     unsigned int status;
     struct async_struct * info;
     int tx_intr_enable = 0;
@@ -1508,7 +1508,7 @@ static int rs_ioctl(struct tty_struct *tty,
 static void rs_set_termios(struct tty_struct *tty, struct ktermios *old_termios)
 {
     struct async_struct *info = (struct async_struct *)tty->driver_data;
-	unsigned int cflag = tty->termios.c_cflag;
+    unsigned int cflag = tty->termios.c_cflag;
     unsigned long flags;
     unsigned int cta_uart_control;
     int uart_idx;
@@ -1902,14 +1902,14 @@ static int rs_open(struct tty_struct *tty, struct file * filp)
 
 static inline void line_info(struct seq_file *m, struct serial_state *state)
 {
-    volatile int *urcs2;
+    volatile unsigned int *urcs2;
     char stat_buf[30];
 
     seq_printf(m, "%d: ",state->line);
 
     stat_buf[0] = 0;
     stat_buf[1] = 0;
-    urcs2 = (int *) (UR_BASE + URCS2 + (0x100 * state->line));
+    urcs2 = (unsigned int *) (UR_BASE + URCS2 + (0x100 * state->line));
     if (!(*urcs2 & URCS2_TX_STOP))
         strcat(stat_buf, "|RTS");
     if (!(*urcs2 & URCS2_RX_STOP))
@@ -1968,7 +1968,7 @@ int cheetah_uart_poll_init(struct tty_driver *driver, int line, char *options)
 
 int cheetah_uart_poll_get_char(struct tty_driver *driver, int line)
 {
-    volatile int *p = (int *) (UR_BASE + (0x100 * cta_console_index));
+    volatile int *p = (unsigned int *) (UR_BASE + (0x100 * cta_console_index));
     int ch;
 
     while (1)
@@ -1982,7 +1982,7 @@ int cheetah_uart_poll_get_char(struct tty_driver *driver, int line)
 void cheetah_uart_poll_put_char(struct tty_driver *driver, int line, char ch)
 {
     int i;
-    volatile int *p = (int *) (UR_BASE + (0x100 * cta_console_index));
+    volatile int *p = (unsigned int *) (UR_BASE + (0x100 * cta_console_index));
 
     /* Wait for UARTA_TX register to empty */
     i = 1000000;
@@ -2111,9 +2111,6 @@ static int __init cheetah_rs_init(void)
     serial_driver->flags = TTY_DRIVER_REAL_RAW | TTY_DRIVER_DYNAMIC_DEV;
     tty_set_operations(serial_driver, &serial_ops);
 
-    if (tty_register_driver(serial_driver))
-        panic("Couldn't register serial driver\n");
-
     for (i=0;i<NR_PORTS;i++)
     {
         //tty_register_device(serial_driver, i, NULL);
@@ -2130,7 +2127,7 @@ static int __init cheetah_rs_init(void)
         state->icount.overrun = state->icount.brk = 0;
         tty_port_init(&state->tport);
         state->tport.ops = &panther_uart_port_ops;
-        tty_port_link_device(&state->tport, serial_driver, 0);
+        tty_port_link_device(&state->tport, serial_driver, i);
 
         printk(KERN_INFO "ttyS%d is enabled\n",
                state->line);
@@ -2177,6 +2174,9 @@ static int __init cheetah_rs_init(void)
         tty_name[4] = '0' + i;
         state->dev = device_create(rs_class, NULL, MKDEV(TTY_MAJOR, (64 + i)), NULL, (const char *)tty_name);
     }
+
+    if (tty_register_driver(serial_driver))
+        panic("Couldn't register serial driver\n");
 
 #if defined(CONFIG_CHEETAH_INTERNAL_DEBUGGER)
     register_idb_command(&idb_uart_cmd);
@@ -2236,7 +2236,7 @@ module_exit(cheetah_rs_exit)
 void cheetah_serial_outc(unsigned char c)
 {
     int i;
-    volatile int *p = (int *) (UR_BASE + (0x100 * cta_console_index));
+    volatile unsigned int *p = (unsigned int *) (UR_BASE + (0x100 * cta_console_index));
 
 #if defined(CONFIG_TODO)
     /* Disable UARTA_TX interrupts */
@@ -2258,11 +2258,11 @@ void cheetah_serial_outc(unsigned char c)
 
 static __init int serial_console_setup(struct console *co, char *options)
 {
-    int baud = CONFIG_CHEETAH_UART_BAUDRATE;
+    unsigned int baud = CONFIG_CHEETAH_UART_BAUDRATE;
     //int bits = 8;
     int parity = 'n';
     char *s;
-    int brsr = 0;
+    unsigned int brsr = 0;
     unsigned int cta_uart_control;
     unsigned long flags;
 
@@ -2363,14 +2363,14 @@ console_initcall(cheetah_serial_console_init);
 
 static int __init _console_setup(char *str)
 {
-    volatile int *p;
-    int brsr;
+    volatile unsigned int *p;
+    unsigned int brsr;
 
     if (!strncmp("ttyS", str, 4))
         cta_console_index = str[4] - '0';
 
     brsr = urcs_cal_baud_cnt(CONFIG_CHEETAH_UART_BAUDRATE);
-    p = (int *) (UR_BASE + URCS + (0x100 * cta_console_index));
+    p = (unsigned int *) (UR_BASE + URCS + (0x100 * cta_console_index));
     *p =  ((*p &0x8000FFFFUL)|(brsr<<URCS_BRSHFT));
 
     cta_console.index = cta_console_index;
