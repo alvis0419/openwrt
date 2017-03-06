@@ -9,3 +9,13 @@ kernel/linux-3.18.45
 export STAGING_DIR=/workplace3/openwrt/toolchain-mipsel_mips32_gcc-4.8-linaro_uClibc-0.9.33.2
 make CROSS_COMPILE=mipsel-openwrt-linux- -j8
 ../../qemu-system-mipsel -kernel vmlinux -nographic -m 256
+
+
+# Panther kernel configuration note
+
+CONFIG_EARLY_PRINTK=y
+CONFIG_CMDLINE_BOOL=y
+CONFIG_CMDLINE="mem=256M@0 console=ttyS0 lpj=375000"
+CONFIG_CMDLINE_OVERRIDE=y
+
+
