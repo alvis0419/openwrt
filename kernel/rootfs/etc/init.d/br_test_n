@@ -1,0 +1,52 @@
+#!/bin/sh
+
+help() {
+        echo "usage: br_test_n [ssid] [mac[5]] [1-13] [+|-]"
+        echo "                 stop"
+        exit 0
+}
+
+if [ "$1" == "stop" ]; then
+	kill `pidof dnsmasq`
+	kill `pidof hostapd`
+	exit 0
+fi
+
+if [ -n "$3" ]; then
+        if [ "$3" -ge "1" -a "$3" -le "13" ]; then
+                echo set channel to $3
+        else
+                help
+        fi
+fi
+
+if [ -n "$4" -a "$4" != "+" -a "$4" != "-" ]; then
+        help
+fi
+
+/etc/init.d/beacon_test_n "$1" "$2" no_dns "$3" "$4"
+
+cat > "/etc/dnsmasq.conf" <<EOF
+dhcp-range=192.168.0.2,192.168.0.254,8h
+dhcp-leasefile=/tmp/dnsmasq.leases
+pid-file=/tmp/dnsmasq.pid
+interface=br
+EOF
+
+br_exit=`ifconfig | grep "^br "`
+if [ -z "$br_exit" ]; then
+sleep 2
+brctl addbr br
+sleep 1
+brctl addif br wlan0
+sleep 1
+/etc/init.d/ethopen 1
+sleep 1
+ifconfig eth0.4095 0.0.0.0
+sleep 1
+brctl addif br eth0.4095
+ifconfig br 192.168.0.1
+fi
+sleep 1
+dnsmasq
+

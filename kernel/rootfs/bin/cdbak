@@ -1,0 +1,48 @@
+#!/bin/sh
+
+. /etc/cdb.sh
+
+cdbak()
+{
+#	config_get val $1
+	config_getraw val $1
+	config_setraw $2 "$val"
+}
+
+save()
+{
+	cdbak op_work_mode omi_work_mode
+	cdbak wl_bss_ssid2 omi_bss_ssid2
+	cdbak wl_bss_bssid2 omi_bss_bssid2
+
+	cdbak wl_bss_cipher2 omi_bss_cipher2
+	cdbak wl_bss_wpa_psk2 omi_bss_wpa_psk2
+	cdbak wl_bss_sec_type2 omi_bss_sec_type2
+	cdbak wl_bss_wep_1key2 omi_bss_wep_1key2
+	cdbak wl_bss_wep_2key2 omi_bss_wep_2key2
+	cdbak wl_bss_wep_3key2 omi_bss_wep_3key2
+	cdbak wl_bss_wep_4key2 omi_bss_wep_4key2
+
+}
+
+restore()
+{
+	cdbak omi_work_mode	op_work_mode
+	cdbak omi_bss_ssid2 wl_bss_ssid2
+	cdbak omi_bss_bssid2 wl_bss_bssid2
+
+	cdbak omi_bss_cipher2 wl_bss_cipher2
+	cdbak omi_bss_wpa_psk2 wl_bss_wpa_psk2
+	cdbak omi_bss_sec_type2 wl_bss_sec_type2
+	cdbak omi_bss_wep_1key2 wl_bss_wep_1key2
+	cdbak omi_bss_wep_2key2 wl_bss_wep_2key2
+	cdbak omi_bss_wep_3key2 wl_bss_wep_3key2
+	cdbak omi_bss_wep_4key2 wl_bss_wep_4key2
+
+	cdb commit
+}
+
+case $1 in
+	save)	save;;
+	restore) restore;;
+esac

@@ -1,0 +1,14 @@
+# BTN_X is an event that kernel inform to user
+# gpio is IO pin
+# dir  in/out
+# init  initial value for out
+# delay from press to release
+# type: 1:KEY; 5:SW
+# desc: description less then 32.
+# NOTE: if BTN_X is not enable please set the gpio = -1
+
+BTN_0="gpio=6&dir=in&delay=5&low_trig=1&type=1&desc=reboot/reset"
+BTN_1="gpio=12&dir=in&delay=3&low_trig=1&type=1&desc=wps"
+BTN_2="gpio=8&dir=in&delay=0&low_trig=1&type=1&desc=switch"
+BTN_3="gpio=0&delay=0&low_trig=1&type=5&desc=powerdown"
+BTN_4="gpio=-1&dir=in&delay=0&low_trig=1&type=1&desc="

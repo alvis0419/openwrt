@@ -1,0 +1,199 @@
+#!/bin/sh
+
+#
+# The definition of wan_mode
+#
+# 1: static ip
+# 2: dhcp
+# 3: pppoe
+# 4: pptp
+# 5: l2tp
+# 6: bigpond
+# 7: pppoe2
+# 8: pptp2
+# 9: 3g
+#
+
+. /etc/cdb.sh
+. /etc/rdb.sh
+. /etc/if.sh
+
+local boot="0"
+local dhcps_prog="/lib/wdk/dhcps"
+local route_prog="/lib/wdk/route"
+local system_prog="/lib/wdk/system"
+local time_prog="/lib/wdk/time"
+local resolvfile="/etc/resolv.conf"
+local pppresolvfile="/etc/ppp/resolv.conf"
+
+config_get wan_mode wan_mode
+config_get dns_def dns_def
+config_get dns_fix dns_fix
+config_get dns_svr1 dns_svr1
+config_get dns_svr2 dns_svr2
+
+get_if_parm()
+{
+	ifconfig $1 | awk '/ '$2'/&&!/inet6/{ sub(/^.* '$2'[:| ]/,""); print $1}'
+}
+
+get_wangw()
+{
+	route -n | awk '/UG/{ print $2 }'
+}
+
+save_netstatus()
+{
+	local dnsrv=`awk 'BEGIN{ORS=" "} /nameserver/{sub(/nameserver/,""); print $1}' /etc/resolv.conf`
+	config_set wanif_ip `get_if_parm ${WANIF} addr`
+	config_set wanif_mac `get_if_parm ${WANIF} HWaddr 5`
+	config_set wanif_msk `get_if_parm ${WANIF} Mask`
+	config_set wanif_gw `get_wangw`
+# wanif_domain is updated by other script(/etc/dhcpcd.sh), when wan is really connected
+	config_set wanif_conntime `${time_prog}`
+	config_set wanif_dns1 `echo $dnsrv | awk '{print $1}'`
+	config_set wanif_dns2 `echo $dnsrv | awk '{print $2}'`
+	config_set lanif_ip `get_if_parm $LANIF addr`
+	config_set lanif_mac `get_if_parm $LANIF HWaddr 5`
+
+# wanif_state will be updated to STATE_CONNECTED in /etc/dhcpcd.sh or /etc/ppp/ip-up.d/wan
+# wanif_state will be updated to STATE_DISCONNECTED in /etc/ppp/ip-down.d/wan
+}
+
+check_subnet() {
+	config_get lan_msk lan_msk
+	config_get wanif_msk wanif_msk
+	if [ "$lan_msk" == "$wanif_msk" ]; then
+		config_get lan_ip lan_ip
+		config_get wanif_ip wanif_ip
+		local lan_subnet=`echo $lan_ip $lan_msk | awk -F'[ .]' '{print and($1,$5)"."and($2,$6)"."and($3,$7)"."and($4,$8)}'`
+		local wan_subnet=`echo $wanif_ip $wanif_msk | awk -F'[ .]' '{print and($1,$5)"."and($2,$6)"."and($3,$7)"."and($4,$8)}'`
+		if [ "$lan_subnet" == "$wan_subnet" ]; then
+			# change LAN subnet
+			local default_lanmsk="255.255.255.0"
+			local default_lanip1="192.168.0.1"
+			local default_lanip2="192.168.169.1"
+			local default_lansubnet1=`echo $default_lanip1 $default_lanmsk | awk -F'[ .]' '{print and($1,$5)"."and($2,$6)"."and($3,$7)"."and($4,$8)}'`
+			config_set lan_msk $default_lanmsk
+			if [ "$lan_subnet" == "$default_lansubnet1" ]; then
+				config_set lan_ip $default_lanip2
+			else
+				config_set lan_ip $default_lanip1
+			fi
+			config_set smrt_change 1
+			/lib/wdk/commit
+		fi
+	fi
+}
+
+ip_up() {
+	echo "ip_up:"`date +%s` > /dev/console
+	
+	config_get airkiss_done airkiss_done
+	[ ${airkiss_done} == "1" ] && airkiss apply
+
+	case ${WANMODE} in
+		[345])	[ -f ${pppresolvfile} ] && cp ${pppresolvfile} ${resolvfile};;
+		9)		config_get usbif_find_eth usbif_find_eth
+				if [ -z "${usbif_find_eth}" ]; then
+					[ -f ${pppresolvfile} ] && cp ${pppresolvfile} ${resolvfile}
+				fi
+				;;
+	esac
+	if [ "${dns_fix}" == "1" ]; then
+		local dns_str=`grep 'nameserver' ${resolvfile}`
+		sed -i '//d' ${resolvfile}
+		[ "${dns_svr1}" != "" ] && echo -e "nameserver $dns_svr1" >> ${resolvfile}
+		[ "${dns_svr2}" != "" ] && echo -e "nameserver $dns_svr2" >> ${resolvfile}
+		[ "${dns_str}" != "" ] && echo -e ${dns_str} | sed 's/nameserver/\nnameserver/g' >> ${resolvfile}
+	else
+		case `grep -c 'nameserver' ${resolvfile}` in
+			0)	echo -e "nameserver $dns_def" >> ${resolvfile};;
+			*);;
+		esac
+	fi
+	save_netstatus
+
+	# check ip conflict only in wisp mode 
+	config_get op_work_mode op_work_mode
+	[ "$op_work_mode" == "3" ] && check_subnet
+
+	[ -x /lib/wdk/dhcps ] && {
+		/lib/wdk/dhcps
+	}
+	[ -x /lib/wdk/system ] && {
+		/lib/wdk/system ntp
+	}
+
+	[ -x /etc/init.d/fw ] && {
+		[ "${boot}" == "1" ] || {
+			/etc/init.d/fw stop
+		}
+		/etc/init.d/fw start
+	}
+	[ -x /etc/init.d/nat ] && {
+		[ "${boot}" == "1" ] || {
+			/etc/init.d/nat stop
+		}
+		/etc/init.d/nat start
+	}
+	[ -x /lib/wdk/route ] && {
+		/lib/wdk/route
+	}
+	[ "$FROM_IOS" == "1" -a -n "$REMOTE_ADDR" ] && route add "$REMOTE_ADDR" br0
+	[ -x /etc/init.d/ddns ] && {
+		[ "${boot}" == "1" ] || {
+			/etc/init.d/ddns stop
+		}
+		/etc/init.d/ddns start
+	}
+#	[ -x /etc/init.d/qos ] && {
+#		[ "${boot}" == "1" ] || {
+#			/etc/init.d/qos stop
+#		}
+#		/etc/init.d/qos start
+#	}
+	[ -x /etc/init.d/igmpproxy ] && {
+		[ "${boot}" == "1" ] || {
+			/etc/init.d/igmpproxy stop
+		}
+		/etc/init.d/igmpproxy start
+	}
+	[ -x /etc/init.d/upnpd ] && {
+		[ "${boot}" == "1" ] || {
+			/etc/init.d/upnpd stop
+		}
+		/etc/init.d/upnpd start
+	}
+
+	[ -x /usr/bin/mpc ] && {
+		config_get ra_func ra_func
+		if [ $ra_func = 1 ]; then
+			mpc play
+		fi
+		if [ $ra_func = 2 ]; then
+			/etc/init.d/shairport restart
+		fi
+	}
+
+	[ -x "/etc/init.d/spotify" ] && {
+		/etc/init.d/spotify restart
+	}
+
+	wan_state=${STATE_CONNECTED}
+	config_set wanif_state ${wan_state}
+
+	echo "ip_up ok:"`date +%s` > /dev/console
+}
+
+ip_down() {
+	echo "ip_down:"`date +%s` > /dev/console
+
+	wan_state=${STATE_DISCONNECTED}
+	config_set wanif_state ${wan_state}
+}
+
+[ "$2" == "boot" ] && boot="1"
+[ "$1" == "up" ] && ip_up
+[ "$1" == "down" ] && ip_down
+

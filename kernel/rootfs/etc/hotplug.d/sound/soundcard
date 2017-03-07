@@ -1,0 +1,47 @@
+#!/bin/ash
+# Copyright (C) 2013 Montage Inc.
+
+. /etc/cdb.sh
+
+MPD="/etc/init.d/mpd"
+AIRPLAY="/etc/init.d/shairport"
+AUDIO="/etc/usbaudio"
+MPDPID="/var/mpd.pid"
+
+setup_codec_info() {
+	local info=`aplay -l | grep card`
+	local card=`echo "${info}" | grep 'ES9023\|USB Audio' | head -n 1`
+	if [ "${card}" = "" ]; then
+		card=`echo ${info} | head -n 1`
+	fi
+	config_set mpd_codec_info "${card}"
+}
+
+device=`echo ${DEVNAME} | grep audio`
+[ -z ${device} ] && exit
+
+setup_codec_info
+
+case "$ACTION" in
+	add)
+		[ -f ${MPDPID} ] && {
+			pid=`cat ${MPDPID}`
+			kill -9 $pid
+		}
+		${AIRPLAY} restart
+		cdb set mpd_nocheck 0
+		cdb set air_nocheck 0
+		touch $AUDIO
+		;;
+	remove)
+		[ ! -f ${AUDIO} ] && exit
+		[ -f ${MPDPID} ] && {
+			pid=`cat ${MPDPID}`
+			kill -9 $pid
+		}
+		${AIRPLAY} restart
+		cdb set mpd_nocheck 0
+		cdb set air_nocheck 0
+		rm $AUDIO
+		;;
+esac

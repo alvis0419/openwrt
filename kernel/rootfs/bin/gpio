@@ -1,0 +1,43 @@
+#!/bin/sh
+CONF="/etc/gpioconf"
+
+. ${CONF}
+
+num=`cat ${CONF} | sed -e '/^$/d' -e '/#/d' | wc -l`
+num=$(($num-1))
+innum=0
+
+GPIOPROC="/proc/cta-gpio-buttons"
+GPIOPATH="/sys/devices/platform/cta-gpio/gpio"
+
+#Disable gpio
+echo stop > ${GPIOPROC}
+
+for i in `seq 0 ${num}`
+do
+	dir="in"
+	eval BTN=$`echo BTN_$i`
+	line=`echo $BTN | sed 's/&/;/g'`
+	eval $line
+
+	#Change gpio
+	[ $gpio != -1 ] && {
+		if [ "$dir" = "in" ]; then
+			#Modify Kernel
+			[ -z $desc ] && desc="NULL"
+			echo set $innum $gpio $low_trig $type "${desc}" > ${GPIOPROC}
+			innum=$(($innum+1))
+		fi
+		[ -d ${GPIOPATH}/gpio${gpio} ] && {
+			echo $gpio > /sys/class/gpio/unexport
+		}
+		echo $gpio > /sys/class/gpio/export
+		echo $dir > /sys/class/gpio/gpio${gpio}/direction
+		[ "$dir" = "out" ] && {
+			echo $init > /sys/class/gpio/gpio${gpio}/value
+		}
+	}
+
+done
+#Enable gpio
+echo start > ${GPIOPROC}

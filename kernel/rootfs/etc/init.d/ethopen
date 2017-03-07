@@ -1,0 +1,151 @@
+#!/bin/sh
+
+if [ "$1" != "0" -a "$1" != "1" -a "$1" != "hwbr" ]; then
+	echo usage: $0 'port_num|hwbr ["br"|"nat"]'
+	exit 0
+fi
+
+ETHER="eth0."
+VIDW=0
+VIDL=4095
+BR="br0"
+
+PROCFS="/proc/eth"
+
+LMAC="00:60:44:0a:06:00"
+WMAC="00:60:44:0a:06:01"
+
+start_dns_on_lan() {
+cat > "/etc/dnsmasq.conf" <<EOF
+dhcp-range=192.168.0.2,192.168.0.254,8h
+dhcp-leasefile=/tmp/dnsmasq.leases
+pid-file=/tmp/dnsmasq.pid
+interface=${ETHER}${VIDL}
+EOF
+
+	dnsmasq
+}
+
+start_dns_on_br() {
+cat > "/etc/dnsmasq.conf" <<EOF
+dhcp-range=192.168.0.2,192.168.0.254,8h
+dhcp-leasefile=/tmp/dnsmasq.leases
+pid-file=/tmp/dnsmasq.pid
+interface=${BR}
+EOF
+
+	dnsmasq
+}
+
+br_1_with_2_3(){
+	if [ -z "$1" -o -z "$2" -o -z "$3" ]; then
+		echo error arguments
+		exit 1
+	fi
+	brctl addbr $1 -FLOOD_UNKNOW_UC
+	brctl addif $1 $2
+	brctl addif $1 $3
+	ifconfig $2 up |
+	ifconfig $3 up |
+	ifconfig $1 up
+}
+
+[ -f /proc/net/vlan/config ] && vconfig set_name_type DEV_PLUS_VID_NO_PAD
+
+# Vlan iinterface
+vconfig add eth0 ${VIDL} |
+vconfig add eth0 ${VIDW}
+
+# Bring up eth interface to do calibration
+ifconfig ${ETHER}${VIDL} up |
+ifconfig ${ETHER}${VIDW} up |
+ifconfig eth0 up
+
+# Config mac address
+ifconfig ${ETHER}${VIDL} hw ether ${LMAC} |
+ifconfig eth0 hw ether ${LMAC}
+ifconfig ${ETHER}${VIDW} hw ether ${WMAC}
+
+if [ "$1" == "0" ]; then
+	echo sclk > $PROCFS |
+	echo 8021q 0fff000d > $PROCFS |
+	echo 8021q 00008106 > $PROCFS |
+	echo epvid 0fff0000 > $PROCFS |
+	echo epvid 00000100 > $PROCFS |
+	echo epvid 0fff0200 > $PROCFS |
+	echo bssid 0fff0000 > $PROCFS |
+	echo wmode 0 > $PROCFS |
+	echo swctl 1 > $PROCFS
+elif [ "$1" == "1" ]; then
+	echo sclk > $PROCFS |
+	echo 8021q 0fff000e > $PROCFS |
+	echo 8021q 00008105 > $PROCFS |
+	echo epvid 0fff0100 > $PROCFS |
+	echo epvid 00000000 > $PROCFS |
+	echo epvid 0fff0200 > $PROCFS |
+	echo bssid 0fff0000 > $PROCFS |
+	echo wmode 0 > $PROCFS |
+	echo swctl 1 > $PROCFS
+elif [ "$1" == "hwbr" ]; then
+	echo sclk > $PROCFS |
+	echo 8021q 0fff0003 > $PROCFS |
+	echo epvid 0fff0100 > $PROCFS |
+	echo epvid 0fff0000 > $PROCFS |
+	echo bssid 0fff0000 > $PROCFS |
+	echo wmode 0 > $PROCFS |
+	echo swctl 1 > $PROCFS
+fi
+#IFACE=${ETHER}${VIDL}
+#clbr 1
+# calibrate port0 and port1 with TX clk_inv=0 RX clk_inv=1
+# Attention: there is a bug when calibrate after ifplugd
+TCLK=0
+RCLK=1
+echo calibrate 0 $TCLK $RCLK > $PROCFS
+echo calibrate 1 $TCLK $RCLK > $PROCFS
+
+ifplugd -u 0 -d 0 -p -q -i ${ETHER}${VIDL}
+ifplugd -u 0 -d 0 -p -q -i ${ETHER}${VIDW}
+
+#ifconfig lo 127.0.0.1 netmask 255.0.0.0 up
+ifconfig eth0 up
+
+if [ "$1" == "hwbr" ]; then
+	echo ew bf00834c from '('`dw bf00834c 1|awk '{print $2}'`') to (0)'
+	ew bf00834c 0
+	exit 0
+fi
+
+if [ "$2" == "br" ]; then
+	br_1_with_2_3 ${BR} ${ETHER}${VIDL} ${ETHER}${VIDW}
+	# set bit1 for manual control flow-on
+	echo ew bf008854 from '('`dw bf008854 1|awk '{print $2}'`') to (0x02)'
+	ew bf008854 2
+elif [ "$2" == "nat" ]; then
+	mkdir -p /tmp/run
+	ifconfig ${ETHER}${VIDL} 192.168.0.1 netmask 255.255.255.0 up
+	start_dns_on_lan
+
+	/sbin/dhcpcd ${ETHER}${VIDW} -t 0 >/dev/null 2>/dev/null &
+
+	iptables -A INPUT -i ${ETHER}${VIDL} -j ACCEPT
+	echo "1" > /proc/sys/net/ipv4/ip_forward
+	iptables -t nat -A POSTROUTING -s 192.168.0.0/24 -o ${ETHER}${VIDW} -j MASQUERADE
+elif [ "$2" == "br_nat" ]; then
+	mkdir -p /tmp/run
+	# open wifi with ssid and bssid_last_btye, without dns on wlan0
+	/etc/init.d/beacon_test_n test_ap_1 01 no_dns
+	br_1_with_2_3 ${BR} ${ETHER}${VIDL} wlan0
+	ifconfig ${BR} 192.168.0.1 netmask 255.255.255.0 up
+	start_dns_on_br
+
+	/sbin/dhcpcd ${ETHER}${VIDW} -t 0 >/dev/null 2>/dev/null &
+
+	iptables -A INPUT -i ${BR} -j ACCEPT
+	echo "1" > /proc/sys/net/ipv4/ip_forward
+	iptables -t nat -A POSTROUTING -s 192.168.0.0/24 -o ${ETHER}${VIDW} -j MASQUERADE
+else
+	ifconfig ${ETHER}${VIDL} 192.168.0.1 netmask 255.255.255.0 up
+	ifconfig ${ETHER}${VIDW} 192.168.1.1 netmask 255.255.255.0 up
+fi
+

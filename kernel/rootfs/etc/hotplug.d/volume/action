@@ -1,0 +1,29 @@
+#!/bin/sh
+LCD="/usr/bin/st7565p_lcd_cli"
+MAX=29
+val=$(($2*100/$MAX))
+
+air_vol() {
+	if [ $1 == 100 ]; then
+		air_cli v 0
+		return
+	elif [ $1 == 0 ]; then
+		air_cli v -144
+		return
+	fi
+
+	air_cli v $(($1/4-30))
+}
+
+[ $3 != "1" ] && {
+	[ -x ${LCD} ] && $LCD v $val
+	air_vol $val
+	mpc volume $val
+} || {
+	[ -x ${LCD} ] && {
+		$LCD v
+	} || {
+		air_vol $val
+		mpc volume $val
+	}
+}

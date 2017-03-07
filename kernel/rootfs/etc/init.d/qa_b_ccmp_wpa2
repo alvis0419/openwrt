@@ -1,0 +1,19 @@
+#!/bin/sh
+
+mv /dev/random /dev/random.orig
+ln -s /dev/urandom /dev/random
+
+cat > "/hostapd.conf" <<EOF
+interface=wlan0
+driver=nl80211
+hw_mode=b
+channel=1
+ssid=panther_QA
+bssid=00:34:56:78:66:60
+wpa=2
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=CCMP
+wpa_passphrase=12345678
+EOF
+
+start-stop-daemon -S -x /usr/sbin/hostapd -- -B -P /var/run/hostapd.pid /hostapd.conf

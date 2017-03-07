@@ -1,0 +1,10 @@
+#!/bin/sh
+
+ALSA_CTRL_PATH="/var/lib/alsa/asound.state"
+
+[ -d "${ALSA_CTRL_PATH%/*}" ] || mkdir -p ${ALSA_CTRL_PATH%/*}
+[ -x /usr/sbin/alsactl ] && {
+	# for wm8750 & mp320
+    alsactl init
+}
+

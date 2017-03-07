@@ -1,0 +1,997 @@
+#!/bin/sh /etc/rc.common
+
+START=41
+STOP=89
+
+. /etc/if.sh
+. /etc/init.d/hostapd_cli
+
+apcfgfile="/var/run/hostapd.conf"
+aclfile="/var/run/hostapd.acl"
+apcmdline="-B -P /var/run/hostapd.pid /var/run/hostapd.conf"
+
+stacfgfile="/var/run/wpa.conf"
+stacmdline="-B -P /var/run/wpa.pid -i $STA -Dnl80211 -c /var/run/wpa.conf"
+hostapd_ctrl=" -H /var/run/hostapd/wlan0"
+
+hostapd_bin="/usr/sbin/hostapd"
+hostapd_cli_bin="/usr/sbin/hostapd_cli"
+
+PROC="/proc/wla"
+AP2=
+
+#rfchip="0x70"
+
+stapoll="/lib/wdk/stapoll"
+
+rate_flags=0
+
+RFILE="/etc/rf.sh"
+
+# Temporarily for asic RFC. will remove later
+
+safe_cdb_get()
+{
+	cdb_data=""
+	#[ "$#" -lt "2" ] && echo usage: safe_cdb_get output_variable default_value && exit 1
+
+	config_get cdb_data "$1"
+	cdb_data=$( config_chk "$cdb_data" )
+	[ -z "$cdb_data" ] && cdb_data="$2"
+
+	echo $cdb_data
+}
+
+bridge_add() {
+	brctl addif $1 $2
+}
+
+bridge_remove() {
+	brctl delif $1 $2
+}
+
+stop() {
+	hostapd_cli_stop
+	config_get wl_bss_enable3 wl_bss_enable3
+	config_get wl_bss_role3 wl_bss_role3
+	if [ "$wl_bss_enable3" = "1" ]; then
+		let "mbss=$wl_bss_role3 & 2"
+
+		[ "$mbss" -gt 0 ] && {
+			ifconfig wlan1 down
+			bridge_remove $BRAP wlan1
+		}
+	fi
+	[ "${AP}" ] && [ "${BRAP}" ] && [ -f /var/run/hostapd.pid ] && bridge_remove $BRAP $AP
+	[ "${STA}" ] && [ "${BRSTA}" ] && bridge_remove $BRSTA $STA
+
+	if [ "$HOSTAPD" = "1" ]; then
+		start-stop-daemon -K -q -p /var/run/hostapd.pid
+	fi
+	if [ "$WPASUP" = "1" ]; then
+		start-stop-daemon -K -q -p /var/run/wpa.pid
+		ifconfig "${BRSTA}" 0.0.0.0
+	fi
+
+	# P2P mode stop the p2p_cli
+	if [ $OPMODE -eq 8 ]; then
+		start-stop-daemon -K -q -p /var/run/p2p.pid
+	else
+		iw dev sta0 del
+	fi
+
+	sleep 1
+}
+
+get_value()
+{
+        echo ${1} | cut -d '=' -f 2
+}
+
+config_get_wl_wds() {
+        local DATA
+        echo "\$${2}${1}" > /proc/cdb
+        read DATA < /proc/cdb
+	if [ "$DATA" == "!ERR" ]; then
+    	    export "$3="
+	else
+	    export "$3=$DATA"
+	fi
+}
+
+wla_config_wds() {
+
+	rule=0
+	i=1 #wds rule $wl_wds1='gkey=1&en=1&mac=00:12:0e:b5:5b:10&cipher=1&kidx=0'
+
+	while [ 1 ]
+	do
+	    config_get_wl_wds $i wl_wds wl_wds
+	    #echo $wl_wds
+
+	    [ -z "$wl_wds" ] && break
+
+	    echo ${wl_wds} | awk 'FS="&" {print $1,$2,$3,$4,$5}' | while read gkey en mac cipher kidx
+	    do
+		en=`get_value ${en}`
+		mac=`get_value ${mac}`
+		cipher=`get_value ${cipher}`
+		kidx=`get_value ${kidx}`
+
+		#echo $mac
+		macaddr=`echo ${mac//[:]/}`
+
+#		echo "config.wds_peer_addr.$rule=0x$macaddr" > $PROC
+		echo "config.wds_peer_addr.$rule=0x$macaddr" > $PROC
+		echo "config.wds_cipher_type.$rule=${cipher}" > $PROC
+		echo "config.wds_keyid.$rule=${kidx}" > $PROC
+
+		if [ "$cipher" == 1 ] || [ "$cipher" == 2 ]; then
+			idx=`expr $kidx + 1`
+			config_get wep_key wl_bss_wep_${idx}key${idx}
+			echo "config.wds_key${kidx}.${rule}=${wep_key}" > $PROC
+		else
+			config_get wl_bss_wpa_psk1 wl_bss_wpa_psk1
+			MSG=`wpa_passphrase $ssid $wl_bss_wpa_psk1`
+			PSK=`echo $MSG | awk -F" " '{ printf $4 }'`
+			eval $PSK
+			echo "config.wds_key0=${psk}" > $PROC
+		fi
+
+	    done
+
+	    rule=`expr $rule + 1`
+	    i=`expr $i + 1`
+	done
+}
+
+wla_ap_config() {
+	config_get wl_protection wl_protection
+	config_get wl_wds_mode wl_wds_mode
+	config_get wl_forward_mode wl_forward_mode
+	config_get wl_tx_pwr wl_tx_pwr
+
+	echo config.wl_forward_mode=$wl_forward_mode > $PROC
+	echo config.wl_tx_pwr=$wl_tx_pwr > $PROC
+
+	if [ "$wl_protection" = "1" ]; then
+    	    echo config.bg_protection=1 > $PROC
+	else
+    	    echo config.bg_protection=0 > $PROC
+	fi
+
+	echo config.wds_mode=0 > $PROC
+
+	if [ "$wl_wds_mode" = "1" ] || [ "$wl_wds_mode" = "2" ]; then
+    	echo "config.wds_mode=$wl_wds_mode" > $PROC
+
+	    echo config.wds_peer_addr.0=0 > $PROC
+	    echo config.wds_peer_addr.1=0 > $PROC
+	    echo config.wds_peer_addr.2=0 > $PROC
+	    echo config.wds_peer_addr.3=0 > $PROC
+
+	    wla_config_wds
+	else
+		echo config.wds_mode=0 > $PROC
+	fi
+
+# Power Saving
+	config_get wl_ps_mode wl_ps_mode
+	echo config.pw_save=$wl_ps_mode > $PROC
+	if [ "$wl_ps_mode" = "2" ]; then
+		echo config.uapsd=1 > $PROC
+	else
+		echo config.uapsd=0 > $PROC
+	fi
+
+}
+
+wla_sta_config() {
+	config_get wl_bss_role2 wl_bss_role2
+	config_get wl_forward_mode wl_forward_mode
+
+	echo config.wl_forward_mode=$wl_forward_mode > $PROC
+
+	let "sta_mat=$wl_bss_role2 & 256"
+	[ "$sta_mat" -gt 0 ] && echo config.sta_mat=1 > $PROC || echo config.sta_mat=0 > $PROC
+}
+
+config_get_bss() {
+        local DATA
+        echo "\$${2}${1}" > /proc/cdb
+        read DATA < /proc/cdb
+	if [ "$DATA" == "!ERR" ]; then
+    	    export "$3="
+	else
+	    export "$3=$DATA"
+	fi
+}
+
+config_get_bss_sc() {
+        local DATA
+        echo "\$${2}${1}" > /proc/cdb
+        read -a -r DATA < /proc/cdb
+	if [ "$DATA" == "!ERR" ]; then
+    	    export "$3="
+	else
+	    export "$3=$DATA"
+	fi
+}
+
+config_bss_cipher() {
+	# BSS: config get
+	# Role: 1:AP 2:STA
+	local BSS=$1
+	local ROLE=$2
+	cipher_cfg=""
+
+	local mode
+
+	config_get_bss $BSS wl_bss_sec_type wl_bss_sec_type
+	config_get_bss $BSS wl_bss_cipher wl_bss_cipher
+    config_get_bss $BSS wl_bss_key_mgt wl_bss_key_mgt
+    config_get_bss $BSS wl_bss_wps_state wl_bss_wps_state
+	config_get wl_bss_bssid2 wl_bss_bssid2
+	config_get wl_bss_bssid3 wl_bss_bssid3
+
+	if [ ${BSS} != "1" ]; then
+		if [ ${ROLE} = "1" ] && [ "$wl_bss_bssid3" != "00:00:00:00:00:00" ]; then
+				append cipher_cfg "bssid=$wl_bss_bssid3" "$N"
+		elif [ ${ROLE} = "2" ] && [ "$wl_bss_bssid2" != "00:00:00:00:00:00" ]; then
+				append cipher_cfg "bssid=$wl_bss_bssid2" "$N"
+		fi
+	fi
+
+	if [ "$wl_bss_sec_type" != "0" ]; then
+		let "auth_cap_shared=$wl_bss_sec_type & 2"
+		let "auth_cap_wep=$wl_bss_sec_type & 4"
+        let "auth_cap_wpa=$wl_bss_sec_type & 8"
+        let "auth_cap_wpa2=$wl_bss_sec_type & 16"
+        let "auth_cap_wps=$wl_bss_sec_type & 32"
+        let "auth_cap_wapi=$wl_bss_sec_type & 128"
+
+		if [ "$auth_cap_wps" -gt 0 ]; then
+			if [ "$ROLE" = "1" ]; then
+				append cipher_cfg "wps_state=$wl_bss_wps_state" "$N"
+				append cipher_cfg "eap_server=1" "$N"
+				#append cipher_cfg "ap_setup_locked=1" "$N"
+				append cipher_cfg "device_name=Cheetah AP" "$N"
+				append cipher_cfg "manufacturer=Montage" "$N"
+ 				append cipher_cfg "model_name=Cheetah" "$N"
+ 				append cipher_cfg "model_number=3280" "$N"
+ 				append cipher_cfg "serial_number=12345" "$N"
+			 	append cipher_cfg "device_type=6-0050F204-1" "$N"
+ 				append cipher_cfg "os_version=01020300" "$N"
+ 				append cipher_cfg "config_methods=label virtual_display virtual_push_button keypad" "$N"
+ 				append cipher_cfg "upnp_iface=br0" "$N"
+
+				config_get wl_wps_def_pin wl_wps_def_pin
+				[ -z $wl_wps_def_pin ] && {
+					pin=`cat /proc/bootvars | grep pin= | cut -b 5-`
+					config_set wl_wps_def_pin $pin
+					cdb commit > /dev/null
+				}
+ 				append cipher_cfg "ap_pin=$wl_wps_def_pin" "$N"
+			else
+				let "check_sec=$wl_bss_sec_type - $auth_cap_wps"
+				if [ "$check_sec" -le 1 ]; then
+					append cipher_cfg "key_mgmt=NONE" "$N"
+				fi
+			fi
+		fi
+
+		if [ "$auth_cap_wep" -gt 0 ]; then
+
+			config_get_bss $BSS wl_bss_wep_index wl_bss_wep_index
+
+			[ "$ROLE" = "1" ] || append cipher_cfg "key_mgmt=NONE" "$N"
+
+			if [ "$ROLE" = "1" ]; then
+				append cipher_cfg "wep_default_key=$wl_bss_wep_index" "$N"
+			else
+				append cipher_cfg "wep_tx_keyidx=$wl_bss_wep_index" "$N"
+			fi
+
+			config_get_bss $BSS wl_bss_wep_1key wl_bss_wep_key
+			[ -n "$wl_bss_wep_key" ] && {
+			if [ ${#wl_bss_wep_key} = "5"  -o ${#wl_bss_wep_key} = "13" ] ; then
+			    append cipher_cfg "wep_key0=\"$wl_bss_wep_key\"" "$N"
+			else
+				append cipher_cfg "wep_key0=$wl_bss_wep_key" "$N"
+			fi
+			}
+			config_get_bss $BSS wl_bss_wep_2key wl_bss_wep_key
+			[ -n "$wl_bss_wep_key" ] && {
+			if [ ${#wl_bss_wep_key} = "5" -o ${#wl_bss_wep_key} = "13" ] ; then
+				append cipher_cfg "wep_key1=\"$wl_bss_wep_key\"" "$N"
+			else
+				append cipher_cfg "wep_key1=$wl_bss_wep_key" "$N"
+			fi
+			}
+			config_get_bss $BSS wl_bss_wep_3key wl_bss_wep_key
+			[ -n "$wl_bss_wep_key" ] && {
+			if [ ${#wl_bss_wep_key} = "5" -o ${#wl_bss_wep_key} = "13" ] ; then
+				append cipher_cfg "wep_key2=\"$wl_bss_wep_key\"" "$N"
+			else
+				append cipher_cfg "wep_key2=$wl_bss_wep_key" "$N"
+			fi
+			}
+			config_get_bss $BSS wl_bss_wep_4key wl_bss_wep_key
+			[ -n "$wl_bss_wep_key" ] && {
+			if [ ${#wl_bss_wep_key} = "5" -o ${#wl_bss_wep_key} = "13" ] ; then
+				append cipher_cfg "wep_key3=\"$wl_bss_wep_key\"" "$N"
+			else
+				append cipher_cfg "wep_key3=$wl_bss_wep_key" "$N"
+			fi
+			}
+
+			if [ "$ROLE" = "1" ]; then
+				[ "$auth_cap_shared" -gt 0 ] && {
+					append cipher_cfg "auth_algs=2" "$N"
+				}
+			fi
+    	fi
+
+    	if [ "$auth_cap_wpa" -gt 0 ] || [ "$auth_cap_wpa2" -gt 0 ]; then
+
+			if [ "$wl_bss_key_mgt" -gt 0 ]; then
+				append cipher_cfg "ieee8021x=1" "$N"
+				append cipher_cfg "eapol_key_index_workaround=0" "$N"
+				append cipher_cfg "wpa_key_mgmt=WPA-EAP" "$N"
+			else
+				if [ "$ROLE" = "1" ]; then
+					append cipher_cfg "wpa_key_mgmt=WPA-PSK" "$N"
+				else
+					append cipher_cfg "key_mgmt=WPA-PSK" "$N"
+				fi
+			fi
+
+			let "auth_cap_cipher_tkip=$wl_bss_cipher & 4"
+			let "auth_cap_cipher_ccmp=$wl_bss_cipher & 8"
+
+
+			if [ "$ROLE" = "1" ]; then
+				if [ "$auth_cap_wpa" -gt 0 ] && [ "$auth_cap_wpa2" -gt 0 ]; then
+					append cipher_cfg "wpa=3" "$N"		#WPA/WPA2-PSK
+				else if [ "$auth_cap_wpa" -gt 0 ]; then
+					append cipher_cfg "wpa=1" "$N"		#WPA-PSK
+				else if [ "$auth_cap_wpa2" -gt 0 ]; then
+					append cipher_cfg "wpa=2" "$N"		#WPA2-PSK
+				fi
+				fi
+				fi
+			fi
+
+			if [ "$auth_cap_cipher_tkip" -gt 0 ] && [ "$auth_cap_cipher_ccmp" -gt 0 ]; then
+				if [ "$ROLE" = "1" ]; then
+					append cipher_cfg "wpa_pairwise=TKIP CCMP" "$N"	#TKIP/CCMP
+				else
+					append cipher_cfg "pairwise=TKIP CCMP" "$N"	#TKIP/CCMP
+				fi
+			else if [ "$auth_cap_cipher_tkip" -gt 0 ]; then
+				if [ "$ROLE" = "1" ]; then
+					append cipher_cfg "wpa_pairwise=TKIP" "$N"		#TKIP
+				else
+					append cipher_cfg "pairwise=TKIP" "$N"		#TKIP
+				fi
+			else if [ "$auth_cap_cipher_ccmp" -gt 0 ]; then
+				if [ "$ROLE" = "1" ]; then
+					append cipher_cfg "wpa_pairwise=CCMP" "$N"		#CCMP
+				else
+					append cipher_cfg "pairwise=CCMP" "$N"		#CCMP
+				fi
+			fi
+			fi
+			fi
+
+			if [ "$wl_bss_key_mgt" -gt 0 ]; then
+				config_get_bss $BSS wl_bss_radius_svr wl_bss_radius_svr
+				config_get_bss $BSS wl_bss_radius_svr_key wl_bss_radius_svr_key
+				config_get_bss $BSS wl_bss_radius_svr_port wl_bss_radius_svr_port
+				append cipher_cfg "own_ip_addr=127.0.0.1" "$N"
+				append cipher_cfg "auth_server_addr=$wl_bss_radius_svr" "$N"
+				append cipher_cfg "auth_server_port=$wl_bss_radius_svr_port" "$N"
+				append cipher_cfg "auth_server_shared_secret=$wl_bss_radius_svr_key" "$N"
+			else
+#				config_get_bss $BSS wl_bss_wpa_psk wl_bss_wpa_psk
+				config_get_bss_sc $BSS wl_bss_wpa_psk wl_bss_wpa_psk
+				psk_len=`echo $wl_bss_wpa_psk | wc -L`
+				if [ "$ROLE" = "1" ]; then
+					if [ "$psk_len" == "64" ]; then
+						append cipher_cfg "wpa_psk=$wl_bss_wpa_psk" "$N"
+					else
+						append cipher_cfg "wpa_passphrase=$wl_bss_wpa_psk" "$N"
+					fi
+				else
+					if [ "$psk_len" == "64" ]; then
+						append cipher_cfg "psk=$wl_bss_wpa_psk" "$N"
+					else
+						append cipher_cfg "psk=\"$wl_bss_wpa_psk\"" "$N"
+					fi
+				fi
+			fi
+
+
+			if [ "$ROLE" = "1" ]; then
+				config_get_bss $BSS wl_bss_wpa_rekey wl_bss_wpa_rekey
+				append cipher_cfg "wpa_group_rekey=$wl_bss_wpa_rekey" "$N"
+			fi
+		fi
+
+		if [ "$auth_cap_wapi" -gt 0 ]; then
+			config_get_bss $BSS wl_bss_wpa_psk wl_bss_wpa_psk
+			config_get_bss $BSS wl_bss_wpa_rekey wl_bss_wpa_rekey
+
+			append cipher_cfg "wapi=1" "$N"
+			if [ "$ROLE" = "1" ]; then
+				append cipher_cfg "wpa_passphrase=$wl_bss_wpa_psk" "$N"
+				append cipher_cfg "wpa_group_rekey=$wl_bss_wpa_rekey" "$N"
+			else
+				append cipher_cfg "psk=\"$wl_bss_wpa_psk\"" "$N"
+				# Unneccessary apply ptk/group rekey parameter to STA, rekey mechanism created by AP.
+			fi
+		fi
+
+	else
+		if [ "$ROLE" = 2 ]; then
+			append cipher_cfg "key_mgmt=NONE" "$N"
+		fi
+	fi
+	export "$3=$cipher_cfg"
+}
+
+config_get_wl_macf() {
+        local DATA
+        echo "\$${2}${1}" > /proc/cdb
+        read DATA < /proc/cdb
+	if [ "$DATA" == "!ERR" ]; then
+    	    export "$3="
+	else
+	    export "$3=$DATA"
+	fi
+}
+
+hostapd_setup_acl() {
+	rm -f $aclfile
+
+	config_get wl_macf_mode wl_macf_mode
+
+	if [ "$wl_macf_mode" = "1" ] || [ "$wl_macf_mode" = "2" ]; then
+	    i=1
+
+	    while [ 1 ]
+	    do
+		config_get_wl_macf $i wl_macf wl_macf
+		#echo $wl_macf
+
+		[ -z "$wl_macf" ] && break
+
+		echo ${wl_macf} | awk 'FS="&" {print $1,$2}' | while read en smac
+		do
+		    en=`get_value ${en}`
+		    smac=`get_value ${smac}`
+
+		    [ "$en" = "1" ] && echo "$smac" >> $aclfile
+		done
+
+		i=`expr $i + 1`
+	    done
+
+	    echo "$N" >> $aclfile
+
+	    if [ "$wl_macf_mode" = "1" ]; then
+		hostapd_acl="macaddr_acl=0"
+		append hostapd_acl "deny_mac_file=$aclfile" "$N"
+	    else
+		hostapd_acl="macaddr_acl=1"
+		append hostapd_acl "accept_mac_file=$aclfile" "$N"
+	    fi
+
+	else
+	    hostapd_acl="macaddr_acl=0"
+	fi
+}
+
+mac80211_hostapd_setup_base() {
+	hw_mode="g"
+
+	config_get wl_wds_mode wl_wds_mode
+
+        config_get wl_frag wl_frag
+	config_get wl_rts wl_rts
+        config_get wl_bss_wmm_enable1 wl_bss_wmm_enable1
+	config_get wl_channel wl_channel
+
+	config_get wl_bss_ssid1 wl_bss_ssid1
+	ssid=`echo $wl_bss_ssid1 | sed -e 's/_%[1-6]x$//'`
+	[ ${ssid} != ${wl_bss_ssid1} ] && {
+		num=`echo ${wl_bss_ssid1} | sed s/^${ssid}_%// | sed s/[^1-6]//`
+		startnum=$(((6-$num)*3+6))
+		mac=`cat /proc/bootvars | grep mac0 | cut -b ${startnum}- | sed s/://g`
+		wl_bss_ssid1=${ssid}_${mac}
+		config_set wl_bss_ssid1 ${wl_bss_ssid1}
+		cdb commit > /dev/null
+	}
+	config_get wl_bss_ssid_hidden1 wl_bss_ssid_hidden1
+
+	config_get wl_bss_enable3 wl_bss_enable3
+	config_get wl_bss_ssid3 wl_bss_ssid3
+        config_get wl_bss_ssid_hidden3 wl_bss_ssid_hidden3
+	config_get wl_bss_role3 wl_bss_role3
+
+	config_get wl_bb_mode wl_bb_mode
+	config_get wl_2choff wl_2choff
+	config_get wl_sgi wl_sgi
+
+	config_get wl_tbtt wl_tbtt
+	config_get wl_dtim wl_dtim
+
+	config_get wl_preamble wl_preamble
+	config_get wl_ps_mode wl_ps_mode
+	config_get wl_ht_mode wl_ht_mode
+
+	config_get wl_2040_coex wl_2040_coex
+	config_get wl_force_2040 wl_force_2040
+	config_get wl_beacon_listen wl_beacon_listen
+
+	config_get wl_basic_rates wl_basic_rates
+	if [ "$wl_basic_rates" = "0" ]; then
+		basic_rates="10 20 55 60 110 120 240"
+	elif [ "$wl_basic_rates" = "3" ]; then
+		basic_rates="10 20"
+	elif [ "$wl_basic_rates" = "16" ]; then
+		basic_rates="10 20 55 110"
+	elif [ "$wl_basic_rates" = "127" ]; then
+		basic_rates="10 20 55 60 110 120 240"
+	fi
+
+
+	if [ "$wl_ps_mode" = "2" ]; then
+    	wl_apsd=1
+	else
+		wl_apsd=0
+	fi
+
+	if [ -n "$wl_preamble" ]; then
+	    if [ "$wl_preamble" = "0" ]; then
+		preamble=1
+	    else
+		preamble=0
+	    fi
+	else
+    	    preamble=0
+	fi
+
+	if [ -n "$wl_tbtt" ]; then
+	    [ $wl_tbtt -le 15 ] && {
+		wl_tbtt=15
+	    }
+	    [ $wl_tbtt -ge 65535 ] && {
+		wl_tbtt=65535
+	    }
+	else
+    	    wl_tbtt=100
+	fi
+
+	if [ -n "$wl_dtim" ]; then
+	    [ $wl_dtim -le 1 ] && {
+		wl_dtim=1
+	    }
+	    [ $wl_dtim -ge 255 ] && {
+		wl_dtim=255
+	    }
+	else
+    	    wl_dtim=2
+	fi
+
+	if [ -n "$wl_rts" ]; then
+	    [ $wl_rts -le 256 ] && {
+		wl_rts=256
+	    }
+	    [ $wl_rts -ge 2347 ] && {
+		wl_rts=2347
+	    }
+	else
+    	    wl_rts=2347
+	fi
+
+	if [ -n "$wl_frag" ]; then
+	    [ $wl_frag -le 256 ] && {
+		wl_frag=256
+	    }
+	    [ $wl_frag -ge 2346 ] && {
+		wl_frag=2346
+	    }
+	else
+	    wl_frag=2346
+	fi
+
+	if [ "$wl_bb_mode" = "1" ]; then
+	    hw_mode="b"
+	else
+
+	[ "$wl_bb_mode" -ge 4 ] && {
+	    append base_cfg "ieee80211n=1" "$N"
+
+	    [ "$wl_2choff" = "0" ] && [ "$wl_sgi" = "1" ] && {
+		ht_capab="[SHORT-GI-20]"
+	    }
+
+	    [ "$wl_2choff" = "1" ] && {
+		ht_capab="[HT40+]"
+		[ "$wl_sgi" = "1" ] && {
+		    append ht_capab "[SHORT-GI-20][SHORT-GI-40]"
+		}
+	    }
+
+	    [ "$wl_2choff" = "2" ] && {
+		ht_capab="[HT40-]"
+		[ "$wl_sgi" = "1" ] && {
+		    append ht_capab "[SHORT-GI-20][SHORT-GI-40]"
+		}
+	    }
+
+	    [ "$wl_2choff" = "3" ] && {
+		if [ "$wl_channel" = "0" ]; then
+			ht_capab="[HT40+]"
+		else
+			ht_capab="[HT40-AUTO]"
+		fi
+		[ "$wl_sgi" = "1" ] && {
+		    append ht_capab "[SHORT-GI-20][SHORT-GI-40]"
+		}
+	    }
+
+		[ "$wl_ht_mode" = "1" ] && append ht_capab "[GF]"
+
+		append ht_capab "[SMPS-STATIC]"
+
+	    [ -n "$ht_capab" ] && append base_cfg "ht_capab=$ht_capab" "$N"
+
+	    if [ "$wl_2040_coex" = "1" ]; then
+			append base_cfg "noscan=0" "$N"
+			append base_cfg "2040_coex_en=1" "$N"
+		elif [ "$wl_beacon_listen" != "1" ]; then
+			append base_cfg "noscan=1" "$N"
+		fi
+	}
+
+	fi
+
+        if [ "$wl_wds_mode" = "1" ]; then
+        	append bss1_cfg "ssid=___wds_bridge___" "$N"
+        	append bss1_cfg "ignore_broadcast_ssid=1" "$N"
+        else
+        	append bss1_cfg "ssid=$wl_bss_ssid1" "$N"
+        	[ "$wl_bss_ssid_hidden1" = "1" ] && {
+        	    append bss1_cfg "ignore_broadcast_ssid=1" "$N"
+        	}
+        	config_bss_cipher 1 1 ap_bss1_cipher_cfg
+        fi
+
+	[ -n "$wl_beacon_listen" ] && append base_cfg "obss_survey_en=$wl_beacon_listen" "$N"
+
+	# Multiple bssid
+	if [ "$wl_bss_enable3" = "1" ]; then
+		let "mbss=$wl_bss_role3 & 2"
+
+		[ "$mbss" -gt 0 ] && {
+			append bss2_cfg "bss=wlan1" "$N"
+			append bss2_cfg "ssid=$wl_bss_ssid3" "$N"
+			[ "$wl_bss_ssid_hidden3" = "1" ] && {
+				append bss2_cfg "ignore_broadcast_ssid=1" "$N"
+			}
+			config_bss_cipher 3 1 ap_bss2_cipher_cfg
+			AP2="wlan1"
+		}
+	fi
+
+	#echo $ap_bss1_cipher_cfg
+	#echo $ap_bss2_cipher_cfg
+	hostapd_setup_acl
+
+	wl_region=$(safe_cdb_get wl_region "US")
+
+        cat > "$apcfgfile" <<EOF
+interface=$AP
+driver=nl80211
+fragm_threshold=$wl_frag
+rts_threshold=$wl_rts
+beacon_int=$wl_tbtt
+dtim_period=$wl_dtim
+preamble=$preamble
+uapsd_advertisement_enabled=$wl_apsd
+channel=$wl_channel
+hw_mode=$hw_mode
+basic_rates=$basic_rates
+$hostapd_acl
+wmm_enabled=$wl_bss_wmm_enable1
+wmm_ac_bk_cwmin=4
+wmm_ac_bk_cwmax=10
+wmm_ac_bk_aifs=7
+wmm_ac_bk_txop_limit=0
+wmm_ac_bk_acm=0
+wmm_ac_be_aifs=3
+wmm_ac_be_cwmin=4
+wmm_ac_be_cwmax=10
+wmm_ac_be_txop_limit=0
+wmm_ac_be_acm=0
+wmm_ac_vi_aifs=2
+wmm_ac_vi_cwmin=3
+wmm_ac_vi_cwmax=4
+wmm_ac_vi_txop_limit=94
+wmm_ac_vi_acm=0
+wmm_ac_vo_aifs=2
+wmm_ac_vo_cwmin=2
+wmm_ac_vo_cwmax=3
+wmm_ac_vo_txop_limit=47
+wmm_ac_vo_acm=0
+tx_queue_data3_aifs=7
+tx_queue_data3_cwmin=15
+tx_queue_data3_cwmax=1023
+tx_queue_data3_burst=0
+tx_queue_data2_aifs=3
+tx_queue_data2_cwmin=15
+tx_queue_data2_cwmax=63
+tx_queue_data2_burst=0
+tx_queue_data1_aifs=1
+tx_queue_data1_cwmin=7
+tx_queue_data1_cwmax=15
+tx_queue_data1_burst=3.0
+tx_queue_data0_aifs=1
+tx_queue_data0_cwmin=3
+tx_queue_data0_cwmax=7
+tx_queue_data0_burst=1.5
+country_code=$wl_region
+ieee80211d=1
+$base_cfg
+$bss1_cfg
+ctrl_interface=/var/run/hostapd
+$ap_bss1_cipher_cfg
+$bss2_cfg
+$ap_bss2_cipher_cfg
+EOF
+}
+
+ap_list() {
+	for idx in `seq 1 10`
+	do
+		rule=wl_aplist_info$idx
+		config_get rule $rule
+		[ "$rule" == "!ERR" -o "$rule" == "" ] && break
+		ssid=${rule##*ssid=}
+		eval `echo $rule | cut -d'&' -f 1` #bssid
+		eval `echo $rule | cut -d'&' -f 2` #sec
+		cipher=`echo $rule | cut -d'&' -f 3 | sed 's/cipher=//'` #cipher
+		eval `echo $rule | cut -d'&' -f 4` #last
+
+		pass=wl_aplist_pass$idx
+		config_get pass $pass
+
+# start fill info
+		append ap_list_info "network={ " "$N"
+		append ap_list_info "ssid=\"$ssid\"" "$N"
+
+		[ ! -z "$bssid" ] && {
+			append ap_list_info "bssid=$bssid" "$N"
+		}
+
+		[ $sec != "none" ] && {
+			[ $sec == "wep" ] && {
+				append ap_list_info "key_mgmt=NONE" "$N"
+				append ap_list_info "wep_key0=$pass" "$N"
+				append ap_list_info "wep_key1=$pass" "$N"
+				append ap_list_info "wep_key2=$pass" "$N"
+				append ap_list_info "wep_key3=$pass" "$N"
+				append ap_list_info "wep_tx_keyidx=0" "$N"
+			} || {
+				append ap_list_info "key_mgmt=WPA-PSK" "$N"
+				append ap_list_info "pairwise=$cipher" "$N"
+				append ap_list_info "psk=\"$pass\"" "$N"
+			}
+		} || {
+			append ap_list_info "key_mgmt=NONE" "$N"
+		}
+		[ $last == 1 ] && {
+			append ap_list_info "priority=1" "$N"
+		}
+		append ap_list_info "}" "$N"
+	done
+}
+
+mac80211_wpasupp_setup_base() {
+	config_get wl_aplist_en wl_aplist_en
+	if [ $wl_aplist_en = 1 ]; then
+		aplist
+		ap_list
+	else
+	#	config_get wl_bss_ssid2 wl_bss_ssid2
+		config_getraw wl_bss_ssid2 wl_bss_ssid2
+		config_bss_cipher 2 2 sta_bss2_cipher_cfg
+	fi
+
+	scan_interval=0
+	if [ "$1" = "3" ]; then
+		scan_interval=40
+	fi
+
+	wl_region=$(safe_cdb_get wl_region "US")
+
+	if [ $wl_aplist_en = 1 ]; then
+	cat > "$stacfgfile" <<EOF
+ctrl_interface=/var/run/wpa_supplicant
+$ap_list_info
+scan_interval=$scan_interval
+country=$wl_region
+EOF
+
+	else
+	cat > "$stacfgfile" <<EOF
+ctrl_interface=/var/run/wpa_supplicant
+network={
+ssid="${wl_bss_ssid2}"
+$sta_bss2_cipher_cfg
+}
+scan_interval=$scan_interval
+country=$wl_region
+EOF
+	fi
+}
+
+mac80211_p2p_setup_base() {
+	#config_get wl_forward_mode wl_forward_mode
+	#echo config.wl_forward_mode=$wl_forward_mode > $PROC
+	#echo config.sta_mat=1 > $PROC
+
+	cat > "$stacfgfile" <<EOF
+ctrl_interface=/var/run/wpa_supplicant
+ap_scan=1
+fast_reauth=1
+device_name=montage_p2p
+device_type=1-0050F204-1
+config_methods= virtual_display virtual_push_button keypad
+p2p_listen_reg_class=81
+p2p_listen_channel=11
+p2p_oper_reg_class=81
+p2p_oper_channel=11
+
+EOF
+}
+
+general_config() {
+
+	# AP/BSS isolated
+	config_get wl_ap_isolated wl_ap_isolated
+	config_get wl_bss_isolated wl_bss_isolated
+	echo "config.wl_ap_isolated=$wl_ap_isolated" > $PROC
+	echo "config.wl_bss_isolated=$wl_bss_isolated" > $PROC
+
+	# AMPDU
+	config_get wl_no_ampdu wl_no_ampdu
+	config_get wl_ampdu_tx_mask wl_ampdu_tx_mask
+	config_get wl_recovery wl_recovery
+	echo "config.no_ampdu=$wl_no_ampdu" > $PROC
+	echo "config.ampdu_tx_mask=$wl_ampdu_tx_mask" > $PROC
+	echo "config.recovery=$wl_recovery" > $PROC
+
+	# Fix rate
+	config_get wl_tx_rate wl_tx_rate
+	echo "config.fix_txrate=$wl_tx_rate" > $PROC
+
+	# Fix Rate flags
+	config_get wl_bb_mode wl_bb_mode
+	config_get wl_2choff  wl_2choff
+	config_get wl_sgi wl_sgi
+	config_get wl_preamble wl_preamble
+	[ "$wl_bb_mode" -ge 4 ] && {
+		[ $wl_2choff -gt 0 ] && {
+			rate_flags=$(($rate_flags|1<<2))
+		}
+	[ "$wl_sgi" = "1" ] && [ $wl_2choff -gt 0 ] && {
+		rate_flags=$(($rate_flags|1<<0|1<<1))
+	}
+	[ "$wl_sgi" = "1" ] && [ $wl_2choff = 0 ] && {
+		rate_flags=$(($rate_flags|1<<0))
+	}
+	}
+	[ "$wl_preamble" = "0" ] && {
+		rate_flags=$(($rate_flags|1<<4))
+	}
+
+	echo "config.rate_flags=$rate_flags" > $PROC
+	if [ "$HOSTAPD" = "1" ]; then
+		wla_ap_config
+	fi
+
+	if [ "$WPASUP" = "1" ]; then
+		wla_sta_config
+	fi
+}
+
+check_hostapd() {
+	# return in the iOS path when omnicfg_apply
+	[ -f "/var/run/hostapd.pid" ] || return
+        # check hostapd is stopped
+        result=0
+        while [ "$result" == "0" ]
+        do
+                if ! pidof ${hostapd_bin##*/} > /dev/null; then
+                        result=1
+                        echo "the previous hostapd is stopped"
+                else
+                        result=0
+                        echo "the previous hostapd is not stopped"
+                        sleep 1
+                fi
+        done
+}
+
+start() {
+    config_get wl_enable wl_enable
+	general_config
+	[ -f $RFILE ] && $RFILE
+
+	# Add sta0 for any working mode to prepare scan action
+	if [ $OPMODE -ne 8 ]; then
+		iw dev wlan0 interface add sta0 type managed
+		ifconfig sta0 hw ether $STAMAC
+	fi
+
+	if [ "$wl_enable" = "1" ]; then
+		if [ "$HOSTAPD" = "1" ]; then
+			mac80211_hostapd_setup_base
+			check_hostapd
+			start-stop-daemon -S -x $hostapd_bin -- $apcmdline 2>/dev/null
+			bridge_add $BRAP $AP
+			[ "${AP2}" ] && bridge_add $BRAP $AP2
+			hostapd_cli_start
+		fi
+			#cat $apcfgfile
+		if [ "$WPASUP" = "1" ]; then
+			if [ $OPMODE -eq 8 ]; then
+				mac80211_p2p_setup_base
+			else
+				mac80211_wpasupp_setup_base $OPMODE
+			fi
+			if [ $OPMODE -ge 3 -a $OPMODE -le 5 ]; then
+				start-stop-daemon -S -x wpa_supplicant -- $stacmdline $hostapd_ctrl 2>/dev/null
+			else
+				start-stop-daemon -S -x wpa_supplicant -- $stacmdline 2>/dev/null
+			fi
+
+			if [ $OPMODE -ne 8 ] && [ $OPMODE -ne 4 ] && [ $OPMODE -ne 5 ]; then
+				bridge_add $BRSTA $STA
+			fi
+			# WISP mode/Pure client mode: monitor link status of station
+			if [ $OPMODE -eq 3 ] || [ $OPMODE -eq 9 ]; then
+				ifplugd -u 0 -d 0 -p -q -i $STA
+			fi
+			# br mode: monitor link status of station
+			if [ $OPMODE -eq 4 ] || [ $OPMODE -eq 5 ]; then
+				ifplugd -u 0 -d 0 -p -q -i $STA
+			fi
+
+			# P2P mode call the p2p_cli to handle the p2p progress
+			if [ $OPMODE -eq 8 ]; then
+				p2p_cli -B -p /var/run/p2p.pid
+			fi
+			#cat $stacfgfile
+		fi
+
+		# marked for not re-start hostapd after client mode assoced
+		#[ ! -z ${STA} ] && [ ! -z ${AP} ] && { ${stapoll} & }
+
+
+	else
+		stop
+	fi
+
+	if [ $OPMODE -ne 8 ]; then
+		ifconfig sta0 up
+	fi
+}
+
+restart() {
+	stop
+	start
+}

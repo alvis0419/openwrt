@@ -1,0 +1,20 @@
+#!bin/sh /etc/rc.common
+# Copyright (C) 2013 Montage Inc.
+
+local wk_prog="/etc/init.d/workmode"
+local br_st="/sys/kernel/debug/eth/br_state"
+local br_en="/sys/kernel/debug/eth/br"
+
+while [ 1 ]
+do
+	. /etc/if.sh
+	if [ $OPMODE -eq 0 ]; then
+		local st=`cat ${br_st}`
+		local br=`cat ${br_en}`
+
+		[ "${st}" == "0" ] && [ "${br}" == "1" ] && ${wk_prog} reload 1
+		[ "${st}" == "1" ] && [ "${br}" == "0" ] && ${wk_prog} reload 0
+		echo ${br} > ${br_st}
+	fi
+	sleep 5
+done

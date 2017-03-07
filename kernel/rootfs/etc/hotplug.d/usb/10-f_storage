@@ -1,0 +1,36 @@
+#!/bin/sh
+
+. /etc/cdb.sh
+
+local file_storage="g_file_storage"
+local file_storage_gadget="/lib/modules/2.6.32.11.as/${file_storage}.ko"
+
+send_uevent() {
+	config_get otg_enable otg_enable
+	[ "${otg_enable}" != "1" ] && return
+
+	if [ -b /dev/mmcblk[0-9] ]; then
+		find /sys/class/block/ -name 'mmcblk[0-9]' | while read uevent
+		do
+			local mmc_uevent="${uevent}/uevent"
+			[ -f ${mmc_uevent} ] && {
+				echo "$1" > ${mmc_uevent}
+			}
+		done
+	fi
+}
+
+[ "${DEVTYPE}" == "f_storage" ] || exit 0
+
+[ "${ACTION}" == "add" ] && {
+	send_uevent "add"
+}
+
+[ "${ACTION}" == "remove" ] && {
+	if [ -f ${file_storage_gadget} ]; then
+		rmmod ${file_storage}
+	fi
+	send_uevent "add"
+}
+
+exit 0

@@ -1,0 +1,42 @@
+#!/bin/sh
+
+##FIX ME: restart wan after cdb done...
+exit 0
+
+. /etc/if.sh
+. /etc/cdb.sh
+
+local wan_prog="/etc/init.d/wan"
+
+config_get sys_funcmode sys_funcmode
+config_get op_work_mode op_work_mode
+
+if [ -z "$1" ] || [ -z "$2" ]; then
+	echo "ifplugd error($1)($2)"
+fi
+
+[ $2 = "up" ] && {
+	[ ${sys_funcmode} -ne 0 ] && return 0
+	if [ $OPMODE -eq 6 ]; then
+		echo "action up: ether plug-in($1)"
+		${wan_prog} restart
+	else
+		[ $1 = $PLUGIF ] && ${wan_prog} restart
+	fi
+	return 0
+}
+
+[ $2 = "down" ] && {
+	[ ${sys_funcmode} -ne 0 ] && return 0
+	if [ $OPMODE -eq 6 ]; then
+
+		echo "action down: ether plug-out($1)"
+		if [ $WANMODE -ne 9 ]; then
+			echo "action down: change to mobile 3G mode"
+			${wan_prog} start
+		fi
+	else
+		[ $1 = $PLUGIF ] && ${wan_prog} stop
+	fi
+	return 0
+}

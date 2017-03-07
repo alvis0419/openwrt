@@ -1,0 +1,242 @@
+#!/bin/sh
+# Copyright (C) 2013 Montage Inc.
+
+. /etc/cdb.sh
+
+DEVPATH="/sys${DEVPATH}"
+
+local dlnaprog="/etc/init.d/dlna"
+local sambaprog="/etc/init.d/samba"
+local mtrecordprog="/etc/init.d/mtrec"
+local webcam_fifo="/tmp/webcam_streamer/control"
+local sambaprog_wdk="/lib/wdk/smb"
+
+local dev_root="/media"
+local diskinfo_file="/var/diskinfo.txt"
+local dbg_file="/var/disk.txt"
+local file_storage="g_file_storage"
+local file_storage_gadget="/lib/modules/2.6.32.11.as/${file_storage}.ko"
+
+dbg_reinit() {
+    env >> ${dbg_file}
+}
+
+dbg_init() {
+    rm -f ${dbg_file}
+	dbg_reinit
+}
+
+dbg() {
+	echo "$*" >> ${dbg_file}
+}
+
+start_prog() {
+	# try to start samba and dlna
+	if [ -x "${sambaprog}" ]; then
+		``${sambaprog_wdk} "run" &``
+		dbg "start samba"
+	fi
+	if [ -x "${dlnaprog}" ]; then
+		``${dlnaprog} "start" &``
+		dbg "start dlna"
+	fi
+	if [ -x "${mtrecordprog}" ]; then
+		``${mtrecordprog} "start" &``
+		dbg "start mtrecord"
+	fi
+	if [ -p "${webcam_fifo}" ]; then
+		# check the size of SD card
+		OPATH=`cat $diskinfo_file|head -1`
+		if [ -n "$OPATH" ]; then
+			. /etc/init.d/webcam_mklist
+			out=/webcam
+			ft=avi
+			sn=snapshot
+			#get the settings from `webcam_format`
+			config_get format webcam_format
+			#because script could be executed too early, avoid mis-run by keyword "prot"
+			[ "${format#*prot}" == "$format" ] && return
+			A=`echo "$format" | awk 'BEGIN { RS="\\\\&" } {print $1}' | while read a; do echo "$a"; done`
+			eval $A
+			FREESIZE=`df -m "$OPATH"|awk '{print $4}'|tail -1`
+			FSIZE=$((FREESIZE - 100)) # reserve 100MB
+			exec 5<>$CONTROL_FILE
+			echo -n "fsize $FSIZE $OPATH/$out.$ft $sn" >&5
+			dbg "kick webcam_streamer"
+		fi
+	fi
+}
+
+stop_prog() {
+	# stop samba and dlna
+	if [ -x "${sambaprog}" ]; then
+		``${sambaprog_wdk} "run"``
+		dbg "stop samba"
+	fi
+	if [ -x "${dlnaprog}" ]; then
+		``${dlnaprog} "stop"``
+		dbg "stop dlna"
+	fi
+	if [ -x "${mtrecordprog}" ]; then
+		``${mtrecordprog} "stop" &``
+		dbg "stop mtrecord"
+	fi
+}
+
+get_dev_item() {
+	local file="$1"
+	local name=${file##/*/}
+	local temp=""
+	if [ -e "${file}" ]; then
+		temp=`cat ${file}`
+		if echo "${temp}" | grep -q ':'; then
+			temp=`echo "${temp}" | tr ':' '_'`
+			dbg "rename ${name}=" "${temp}"
+		fi
+	fi
+	if [ "${temp}" == "" ]; then
+		dbg "not found ${name}"
+	fi
+	echo "${temp}"
+}
+
+get_usb_info() {
+	local devpath=${DEVPATH%/*/*/*/*/*/*}
+	local modelfile=`find "${devpath}" -name 'model'`
+	usb_model=`get_dev_item "${modelfile}"`
+	usb_vendor=`get_dev_item "${devpath}/idVendor"`
+	usb_product=`get_dev_item "${devpath}/idProduct"`
+	usb_bcddevice=`get_dev_item "${devpath}/bcdDevice"`
+	usb_serial=`get_dev_item "${devpath}/serial"`
+	dbg "usb device information:"
+	dbg "    model=" "${usb_model}"
+	dbg "    vendor=" "${usb_vendor}"
+	dbg "    product=" "${usb_product}"
+	dbg "    bcddevice=" "${usb_bcddevice}"
+	dbg "    serial=" "${usb_serial}"
+	disk_info="${usb_serial}:${usb_model}"
+	export disk_info
+}
+
+get_mmc_info() {
+	local devpath=${DEVPATH%/*/*}
+	mmc_name=`get_dev_item "${devpath}/name"`
+	mmc_manfid=`get_dev_item "${devpath}/manfid"`
+	mmc_oemid=`get_dev_item "${devpath}/oemid"`
+	mmc_date=`get_dev_item "${devpath}/date"`
+	mmc_type=`get_dev_item "${devpath}/type"`
+	mmc_serial=`get_dev_item "${devpath}/serial"`
+	dbg "mmc device information:"
+	dbg "    name=" "${mmc_name}"
+	dbg "    manfid=" "${mmc_manfid}"
+	dbg "    oemid=" "${mmc_oemid}"
+	dbg "    date=" "${mmc_date}"
+	dbg "    type=" "${mmc_type}"
+	dbg "    serial=" "${mmc_serial}"
+	disk_info="${mmc_serial}:${mmc_name}_${mmc_type}"
+	export disk_info
+}
+
+get_dev_info() {
+	local platform=`find /sys/devices/platform/ -name ${DEVNAME}`
+	if echo "${platform}" | grep -q "ehci"; then
+		get_usb_info
+	fi
+	if echo "${platform}" | grep -q "sdhci"; then
+		get_mmc_info
+	fi
+}
+
+save_diskinfo() {
+	mount | grep "${dev_root}" | cut -d ' ' -f 3 > ${diskinfo_file}
+}
+
+mount_disk() {
+	local disk=${DEVNAME}
+	local dev_path="${dev_root}"
+
+	find "${DEVPATH}" -name "${disk}*[1-9]" | awk 'END{print $0" '${disk}'"}' | sed 's/ /\n/g' | while read part
+	do
+		part=${part##/*/}
+		[ -z ${part} ] && continue
+		[ -d ${dev_path}/${part} ] || mkdir -p ${dev_path}/${part}
+		dbg "partition=" "${part}"
+		if fdisk -l "/dev/${disk}" | grep "/dev/${part}.*Linux"; then
+			dbg "mount" "/dev/${part}" "${dev_path}/${part}"
+			mount "/dev/${part}" "${dev_path}/${part}"
+			if [ $? -eq 0 ]; then
+				dbg "chmod -R 0777" "${dev_path}/${part}"
+				chmod -R 0777 "${dev_path}/${part}"
+			fi
+		else
+			dbg "mount /dev/${part} ${dev_path}/${part} -t auto -o umask=0000"
+			mount "/dev/${part}" "${dev_path}/${part}" -t auto -o umask=0000
+		fi
+	done
+	save_diskinfo
+
+	disk_name=${DEVNAME}
+	export disk_name
+}
+
+umount_disk() {
+	local disk=${DEVNAME}
+	mount | grep "${disk}" | cut -d ' ' -f 1 | while read p
+	do
+		umount -l ${p}
+		dbg "umount" "$p"
+	done
+	save_diskinfo
+}
+
+add_disk() {
+	local platform=`find /sys/devices/platform/ -name 'gadget'`
+	local sdcard=`find /dev/ -name 'mmcblk[0-9]' | xargs | sed 's/ /,/g'`
+	local chargetype=0
+	local dofsg=0
+	config_get otg_enable otg_enable
+	dbg_init
+	get_dev_info
+	if echo "${platform}" | grep -q "mt-udc"; then
+		if [ -f ${file_storage_gadget} -a -f ${platform}/chg_type -a -n "${sdcard}" ]; then
+			chargetype=`cat ${platform}/chg_type`
+			if [ "${otg_enable}" == "1" -a "${chargetype}" == "1" ]; then
+				dofsg=1
+			else
+				if [ "${otg_enable}" != "1" ]; then
+					dbg "otg is disabled"
+				fi
+				if [ "${chargetype}" != "1" ]; then
+					dbg "charger is not SDP"
+				fi
+			fi
+		fi
+	fi
+	if [ ${dofsg} -ne 0 ]; then
+		dbg "umount disk due to file_storage"
+		umount_disk
+		mcc_key pc 1
+		dbg "insmod file_storage"
+		insmod ${file_storage_gadget} file=${sdcard} stall=0 removable=1
+	else
+		mount_disk
+		mcc_key pc 0
+	fi
+	start_prog
+}
+
+remove_disk() {
+	dbg_reinit
+	stop_prog
+	if [ -f ${file_storage_gadget} ]; then
+		rmmod ${file_storage}
+	fi
+	umount_disk
+}
+
+[ "${DEVTYPE}" == "disk" ] || exit 0
+[ "${ACTION}" == "add" ] && add_disk
+[ "${ACTION}" == "remove" ] && remove_disk
+
+exit 0
+

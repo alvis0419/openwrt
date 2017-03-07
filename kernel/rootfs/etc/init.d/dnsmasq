@@ -1,0 +1,55 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2007 OpenWrt.org
+
+. /etc/cdb.sh
+
+START=60
+DNS_SERVERS=""
+DOMAIN=""
+
+start() {
+	config_get dns_enable       dns_enable
+
+	args=""
+	if [ "${dns_enable}" == "0" ]; then
+		# set port to 0 completely disable DNS function, leaving only DHCP
+		args="--port=0"
+	fi
+
+	/usr/sbin/dnsmasq $args && {
+		rm -f /tmp/resolv.conf
+		[ -n "$DOMAIN" ] && echo "search $DOMAIN" >> /tmp/resolv.conf
+		DNS_SERVERS="$DNS_SERVERS 127.0.0.1"
+		for DNS_SERVER in $DNS_SERVERS ; do
+			echo "nameserver $DNS_SERVER" >> /tmp/resolv.conf
+		done
+	}
+}
+
+stop() {
+	[ -f /tmp/resolv.conf ] && {
+		rm -f /tmp/resolv.conf
+		ln -s /tmp/resolv.conf.auto /tmp/resolv.conf
+	}
+	killall dnsmasq
+
+	# be sure dnsmasq is closed
+	local sec=0
+	while [ 1 ]
+	do
+		if ps | grep dnsmasq | grep -v "grep" | grep -v "restart"; then
+			sleep 1
+			sec=$((${sec}+1))
+			if [ ${sec} -ge 10 ]; then
+				logger -t dnsmasq -p 3 "Fatal error, dnsmasq can't be closed"
+				exit 0
+			else
+				killall dnsmasq >/dev/null 2>/dev/null
+			fi
+		else
+			break
+		fi
+	done
+
+	return 0
+}

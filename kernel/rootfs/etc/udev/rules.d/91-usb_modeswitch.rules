@@ -1,0 +1,1 @@
+SUBSYSTEM=="usb", RUN+="/etc/hotplug.d/usb/20-modeswitch"

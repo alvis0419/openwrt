@@ -1,0 +1,21 @@
+#!/bin/sh
+
+
+cat > "/hostapd.conf" <<EOF
+interface=wlan0
+driver=nl80211
+hw_mode=g
+channel=1
+ssid=mac80211 test
+EOF
+
+cat > "/wpa_supplicant.conf" <<EOF
+network={
+ssid="mac80211 test"
+key_mgmt=NONE
+}
+EOF
+
+start-stop-daemon -S -x /usr/sbin/hostapd -- -B -P /var/run/hostapd.pid /hostapd.conf
+sleep 3
+wpa_supplicant -Dnl80211 -iwlan1 -c /wpa_supplicant.conf

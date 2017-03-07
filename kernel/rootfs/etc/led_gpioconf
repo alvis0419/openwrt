@@ -1,0 +1,5 @@
+#
+#
+
+cheetah_gpio10="trigger=none&brightness=1"
+cheetah_gpio11="trigger=timer&delay_on=500&delay_off=500"

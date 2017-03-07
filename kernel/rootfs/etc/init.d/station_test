@@ -1,0 +1,10 @@
+#!/bin/sh
+
+cat > "/wpa_supplicant.conf" <<EOF
+network={
+ssid="1x1"
+key_mgmt=NONE
+}
+EOF
+
+wpa_supplicant -Dnl80211 -iwlan0 -c /wpa_supplicant.conf &

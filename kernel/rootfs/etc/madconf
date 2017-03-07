@@ -1,0 +1,7 @@
+# RULE_x: x start from 0 to 1
+# chan: madc channel
+# type: 0:NONE; :FIXED; 2:RANGE
+
+RULE_0="chan=0&type=2"
+RULE_1="chan=1&type=2"
+

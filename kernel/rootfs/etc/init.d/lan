@@ -1,0 +1,62 @@
+#!/bin/sh /etc/rc.common
+
+START=40
+STOP=91
+
+. /etc/if.sh
+
+config_get lan_arp_sp lan_arp_sp
+
+ARPSHOW="arp -na"
+ARPADD="arp -s"
+ARPDEL="arp -d"
+
+clear_arp_perm () {
+	$ARPSHOW | grep "PERM on $1" | awk '{ print $2 }'| sed -e s/[\(\)]//g| while read line
+	do
+		$ARPDEL $line
+	done
+}
+
+set_arp_lan_bind () {
+	for line in `seq 1 20`
+	do
+		line=lan_arp_entry$line
+		config_get line $line
+		[ "$line" == "!ERR" -o "$line" == "" ] && break
+		line=`echo $line | sed -e 's/&/;/g'`
+		eval $line
+		if [ "$en" = "1" ]; then
+				$ARPADD $ip $mac
+		fi
+	done
+}
+
+stop() {
+	clear_arp_perm $LANIF
+
+	ifconfig lo 0.0.0.0 down >/dev/null 2>/dev/null
+	ifconfig $LANIF 0.0.0.0 down >/dev/null 2>/dev/null
+}
+
+start() {
+	local ipaddr
+	local netmask
+
+	config_get ipaddr lan_ip
+	config_get netmask lan_msk
+
+	ifconfig lo 127.0.0.1 netmask 255.0.0.0 up
+	[ "$OPMODE" != "8" ] && [ "$OPMODE" != "9" ] && ifconfig eth0 up
+	ifconfig $LANIF $ipaddr netmask $netmask up
+
+	#echo $ipaddr $netmask
+
+	[ "$lan_arp_sp" != "0" ] && set_arp_lan_bind
+
+}
+
+restart() {
+	stop
+	start
+}

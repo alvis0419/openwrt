@@ -1,0 +1,31 @@
+#!/bin/sh
+
+CONF="/etc/madconf"
+MADCPROC="/proc/madc"
+
+[ -f $MADCPROC ] || exit
+
+. ${CONF}
+
+num=`cat ${CONF} | grep RULE | sed -e '/^$/d' -e '/#/d' | wc -l`
+[ $num -gt 2 ] && exit
+echo total $num > ${MADCPROC}
+
+num=$(($num-1))
+#Disable madc
+echo stop > ${MADCPROC}
+
+echo reset > ${MADCPROC}
+for i in `seq 0 ${num}`
+do
+	eval RULE=$`echo RULE_$i`
+	line=`echo $RULE | sed 's/&/;/g'`
+	eval $line
+
+	#Modify Kernel
+	#echo chan=$chan type=$type
+	echo set $chan $type > ${MADCPROC}
+
+done
+#Enable madc
+echo start > ${MADCPROC}

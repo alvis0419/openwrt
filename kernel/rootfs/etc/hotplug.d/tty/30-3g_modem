@@ -1,0 +1,154 @@
+#!/bin/ash
+# Copyright (C) 2013 Montage Inc.
+
+. /etc/cdb.sh
+if [ -f /tmp/rule ]; then
+	. /tmp/rule
+else
+	config_get MODE wan_mode
+	config_get OP op_work_mode
+fi
+
+MODEMIF_EPNUM="03"
+MOB_MODEM=9
+OP_SMART=6
+OP_MB=7
+
+local wan_script="/etc/init.d/wan"
+local dbg_file="/var/log/3g_modem_hotplug.log"
+
+dbg_reinit() {
+	env >> ${dbg_file}
+}
+
+dbg_init() {
+	rm -f ${dbg_file}
+	dbg_reinit
+}
+
+dbg() {
+	echo "$*" >> ${dbg_file}
+}
+
+restart_prog() {
+	# try to start wan script
+	if [ -x "${wan_script}" ]; then
+		``${wan_script} "restart" &``
+		dbg "restart wan script"
+	fi
+}
+
+stop_prog() {
+	# try to stop wan script
+	if [ -x "${wan_script}" ]; then
+		``${wan_script} "stop"``
+		dbg "stop wan script"
+	fi
+}
+
+get_usb_dir() {
+	local usb_dir="/sys/$DEVPATH"
+	while [ -n "${usb_dir}" ]; do
+		[ -f "${usb_dir}/idVendor" -a -f "${usb_dir}/idProduct" ] && {
+			break
+		}
+		usb_dir="${usb_dir%/*}"
+	done
+	echo "${usb_dir}"
+}
+
+check_3g_modem_attach() {
+	local apnlist="/etc/config/apnlist.lst"
+	local modemlist="/etc/config/modem.lst"
+	local gcom_prog="/usr/bin/comgt"
+	local gcom_getismi="/etc/gcom/getimsi.gcom"
+	local gcom_getpin="/etc/gcom/getpin.gcom"
+	local gcom_getmccmnc="/etc/gcom/getmccmnc.gcom"
+	local uVid=""
+	local uPid=""
+	local line=""
+	local modem_tty=""
+	local user_tty=""
+	local tele=""
+	local usb_dir=`get_usb_dir`
+
+	[ -z "${usb_dir}" ] && {
+		dbg "usb dir not found!!"
+		return
+	}
+
+	uVid=`cat "${usb_dir}/idVendor"`
+	uPid=`cat "${usb_dir}/idProduct"`
+	line=`grep "^${uVid}:${uPid}" $modemlist|head -1`
+	prefix="/sys${DEVPATH%?/*/*/*}"
+
+	modem_tty=`echo "${line}" | awk -F, '{print $3}'`
+	user_tty=`echo "${line}" | awk -F, '{print $2}'`
+	modem_tty=`echo $prefix$modem_tty/ttyUSB*`
+	user_tty=`echo $prefix$user_tty/ttyUSB*`
+	modem_tty="${modem_tty##*/}"
+	user_tty="${user_tty##*/}"
+
+	[ "${modem_tty}" != "$DEVNAME" ] && {
+		dbg "modem tty mismatch DEVNAME!!"
+		return
+	}
+	[ "${user_tty}" == "" ] && {
+		dbg "user tty not found!!"
+		return
+	}
+
+	config_set usbif_modemtty "${modem_tty}"
+	config_set usbif_usertty "${user_tty}"
+
+	modem_tty="/dev/${modem_tty}"
+	user_tty="/dev/${user_tty}"
+
+	[ -x /usr/bin/comgt ] && [ `comgt -d ${modem_tty} -s ${gcom_getpin}` == "READY" ] && {
+		#gcom_prog get [MCC][MNC]; fail exit 1, success exit 0
+		#local mcc_mnc=`$gcom_prog -d ${modem_tty} -s ${gcom_getismi} | sed -n 's/^\([0-9]\{3\}\)\([0-9]\{2\}\).*/\1,\2/p'`
+		local mcc_mnc=`$gcom_prog -d $modem_tty -s $gcom_getmccmnc`
+		[ -n "$mcc_mnc" ] && {
+			line=`sed -n "/^${mcc_mnc}/p" ${apnlist}`
+			tele=`echo $line | awk -F, '{print $6}'`
+			config_set usbif_telecom "$tele"
+		}
+	}
+
+	if [ $MODE == "$MOB_MODEM" ]; then
+		if [ $OP == "$OP_SMART" ] || [ $OP == "$OP_MB" ]; then
+			dbg_init
+			dbg "check 3g modem attach"
+			restart_prog
+		fi
+	fi
+}
+
+check_3g_modem_detach() {
+	config_get usbif_modemtty usbif_modemtty
+	if [ -n $usbif_modemtty ]; then
+		if [ "$usbif_modemtty" == "$DEVNAME" ]; then
+			config_set usbif_modemtty ""
+			config_set usbif_usertty ""
+			config_set usbif_telecom ""
+			dbg "check 3g modem detach"
+			dbg_reinit
+			if [ $MODE == "$MOB_MODEM" ]; then
+				if [ $OP == "$OP_SMART" ] || [ $OP == "$OP_MB" ]; then
+					stop_prog
+				fi
+			fi
+		fi
+	fi
+}
+
+case "$DEVNAME" in
+	ttyUSB*)
+		local endpt_num_file="/sys${DEVPATH%/*/*/*}/bNumEndpoints"
+		[ -e "$endpt_num_file" ] && local numep=`cat $endpt_num_file`
+		[ "${ACTION}" == "add" ] && [ "$numep" == "$MODEMIF_EPNUM" ] && check_3g_modem_attach
+		[ "${ACTION}" == "remove" ] && check_3g_modem_detach
+	;;
+esac
+
+exit 0

@@ -1,0 +1,150 @@
+#!/bin/sh
+. /etc/functions.sh
+
+# initialize defaults
+RAMFS_COPY_BIN=""	# extra programs for temporary ramfs root
+RAMFS_COPY_DATA=""	# extra data files
+export INTERACTIVE=0
+export VERBOSE=1
+export SAVE_CONFIG=1
+export USE_REFRESH=1
+export DELAY=
+export CONF_IMAGE=
+export BACKUP_LIST=
+# parse options
+while [ -n "$1" ]; do
+	case "$1" in
+		-i) export INTERACTIVE=1;;
+		-d) export DELAY="$2"; shift;;
+		-v) export VERBOSE="$(($VERBOSE + 1))";;
+		-q) export VERBOSE="$(($VERBOSE - 1))";;
+		-n) export SAVE_CONFIG=0;;
+		-f) export CONF_IMAGE="$2"; shift;;
+		-b) export BACKUP_LIST="$2"; shift;;
+		-*)
+			echo "Invalid option: $1"
+			exit 1
+		;;
+		*) break;;
+	esac
+	shift;
+done
+
+export CONFFILES=/tmp/sysupgrade.conffiles
+export CONF_TAR=/tmp/sysupgrade.tgz
+
+export ARGV="$*"
+export ARGC="$#"
+
+[ -z "$ARGV" ] && {
+	cat <<EOF
+Usage: $0 [options] <image file or URL>
+
+Options:
+	-d <delay>   add a delay before rebooting
+	-f <config>  restore configuration from .tar.gz (file or url)
+	-i           interactive mode
+	-n	         do not save configuration over reflash
+	-q           less verbose
+	-v           more verbose
+
+EOF
+	exit 1
+}
+
+add_uci_conffiles() {
+	local file="$1"
+	#find /etc/config/config.cdb \
+	#	-type f > "$file"
+	#find /etc/config /etc/passwd /etc/group /etc/dropbear \
+	#	/etc/firewall.user /etc/rc.local -type f > "$file"
+
+	rm -f "$file"
+	[ -f "$BACKUP_LIST" ] && {
+		cat $BACKUP_LIST >> "$file"
+	}
+	return 0
+}
+
+# hooks
+sysupgrade_image_check="platform_check_image"
+sysupgrade_init_conffiles="add_uci_conffiles"
+
+include /lib/upgrade
+
+do_save_conffiles() {
+	[ -z "$(rootfs_type)" ] && {
+		echo "Cannot save config while running from ramdisk."
+		ask_bool 0 "Abort" && exit
+		return 0
+	}
+	run_hooks "$CONFFILES" $sysupgrade_init_conffiles
+	ask_bool 0 "Edit config file list" && vi "$CONFFILES"
+
+	v "Saving config files..."
+	[ -f "$CONFFILES" ] && {
+		[ "$VERBOSE" -gt 1 ] && TAR_V="v" || TAR_V=""
+		tar c${TAR_V}zf "$CONF_TAR" -T "$CONFFILES" 2>/dev/null
+		return 0
+	} || {
+		v "No config files to save"
+		return 1
+	}
+}
+
+type platform_check_image >/dev/null 2>/dev/null || {
+	echo "Firmware upgrade is not implemented for this platform."
+	echo 3 > /tmp/upgrade_status
+#	/etc/init.d/uhttpd restart
+#	v "uhttpd restart..."
+	exit 1
+}
+
+for check in $sysupgrade_image_check; do
+	error=0
+	if [ -f ${ARGV} ]; then
+		  eval "$check \"\$ARGV\""
+		  [ "$?" = "1" ] && {
+			echo "Image check '$check' failed."
+			error=1
+		}
+	else
+		error=1
+	fi
+	[ "$error" = "1" ] && {
+		echo 3 > /tmp/upgrade_status
+#		/etc/init.d/uhttpd restart
+#		v "uhttpd restart..."
+		exit 1
+	}
+done
+
+if [ -n "$CONF_IMAGE" ]; then
+	case "$(get_magic_word $CONF_IMAGE cat)" in
+		# .gz files
+		1f8b) ;;
+		*)
+			echo "Invalid config file. Please use only .tar.gz files"
+			exit 1
+		;;
+	esac
+	get_image "$CONF_IMAGE" "cat" > "$CONF_TAR"
+	export SAVE_CONFIG=1
+elif ask_bool $SAVE_CONFIG "Keep config files over reflash"; then
+	do_save_conffiles
+	[ "$?" = "1" ] && {
+		export SAVE_CONFIG=0
+	} || {
+		export SAVE_CONFIG=1
+	}
+else
+	export SAVE_CONFIG=0
+fi
+run_hooks "" $sysupgrade_pre_upgrade
+
+if [ -n "$(rootfs_type)" ]; then
+	v "Switching to ramdisk..."
+	run_ramfs '. /etc/functions.sh; include /lib/upgrade; do_upgrade'
+else
+	do_upgrade
+fi

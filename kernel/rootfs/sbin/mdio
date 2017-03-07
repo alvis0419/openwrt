@@ -1,0 +1,19 @@
+#!/bin/sh
+
+phy=$1
+reg=$2
+val=$3
+
+if [ $# = 0 ]; then
+	echo -e "Usage:\nRead: mdio phy [reg]\nWrite: mdio phy reg val"
+	return
+fi
+
+dmesg -c > /dev/null
+
+echo mdio $1 $2 $3 > /proc/eth
+
+[ -z $reg ] &&
+dmesg | grep -e "phy${phy} regs" -A 4 ||
+dmesg | grep -e "phy" -A 1
+

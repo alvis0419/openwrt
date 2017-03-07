@@ -1,0 +1,822 @@
+#!/bin/sh /etc/rc.common
+
+START=42
+STOP=90
+
+#
+# The definition of wan_mode
+#
+# 1: static ip
+# 2: dhcp
+# 3: pppoe
+# 4: pptp
+# 5: l2tp
+# 6: bigpond
+# 7: pppoe2
+# 8: pptp2
+# 9: 3g
+#
+
+. /etc/cdb.sh
+. /etc/rdb.sh
+. /etc/if.sh
+
+local commit_prog="/lib/wdk/commit"
+local workmode_prog="/etc/init.d/workmode"
+local log_file="/var/log/messages"
+local phy_debug="/sys/kernel/debug/eth/link_p"
+local br_debug="/sys/kernel/debug/eth/br"
+local pp_debug="/sys/kernel/debug/eth/pp"
+local dhcp_prog="/sbin/dhcpcd"
+local ppp_prog="/usr/sbin/pppd"
+local l2tp_prog="/usr/sbin/l2tpd"
+local l2tpctl_prog="/usr/sbin/l2tp-control"
+local bpa_prog="/usr/sbin/bpalogin"
+local nat_prog="/etc/init.d/nat"
+local dhcps_prog="/lib/wdk/dhcps"
+local route_prog="/lib/wdk/route"
+local system_prog="/lib/wdk/system"
+local time_prog="/lib/wdk/time"
+local resolvfile="/etc/resolv.conf"
+local dialfile="/etc/ppp/peers/ppp0"
+local l2tpfile="/etc/l2tp.conf"
+local bpafile="/etc/bpalogin.conf"
+local pppoptfile="/etc/ppp/options"
+local papfile="/etc/ppp/pap-secrets"
+local chapfile="/etc/ppp/chap-secrets"
+local pppresolvfile="/etc/ppp/resolv.conf"
+local chatfile="/etc/chatscripts/3g.chat"
+local gcom_prog="/usr/bin/comgt"
+local gcom_setpin="/etc/gcom/setpin.gcom"
+local gcom_getismi="/etc/gcom/getimsi.gcom"
+local gcom_getmccmnc="/etc/gcom/getmccmnc.gcom"
+local cron_prog="/usr/sbin/crond"
+local cronfile="/etc/crontabs/root"
+local max_alias=5
+local use_comgt=0
+
+config_get sys_funcmode sys_funcmode
+#config_get wan_mode wan_mode
+config_get dns_def dns_def
+config_get dns_fix dns_fix
+config_get dns_svr1 dns_svr1
+config_get dns_svr2 dns_svr2
+config_get wan_arpbind_enable wan_arpbind_enable
+
+#local wdog_prog="/lib/wdk/wdog"
+
+ARPSHOW="arp -na"
+ARPADD="arp -s"
+ARPDEL="arp -d"
+
+kmsg3g() {
+	echo "[3G modem]$*" > /dev/kmsg
+}
+
+clear_arp_perm () {
+	$ARPSHOW | grep "PERM on $1" | awk '{ print $2 }'| sed -e s/[\(\)]//g| while read line
+	do
+		$ARPDEL $line
+	done
+}
+
+set_arp_wan_bind () {
+	route -n | grep "UG" | awk '{print $2}' | while read line
+	do
+		gw=${line}
+		mac=`arping $gw -I $WANIF -c 1 | grep "Unicast reply" | awk '{print $5}' | sed -e s/\\\[// -e s/\\\]//`
+		$ARPADD $gw $mac
+	done
+}
+
+get_if_parm()
+{
+	ifconfig $1 | awk '/ '$2'/&&!/inet6/{ sub(/^.* '$2'[:| ]/,""); print $1}'
+}
+
+clear_netstatus()
+{
+	local conntimes
+
+	config_get conntime wanif_conntime
+	config_get conntimes wanif_conntimes
+	conntime=`config_chk ${conntime}`
+	conntimes=`config_chk ${conntimes}`
+	if [ "${conntime}" == "" ]; then
+		conntime=0
+	fi
+	if [ "${conntimes}" == "" ]; then
+		conntimes=0
+	fi
+	conntimes=$(($((`${time_prog}`-${conntime}))+${conntimes}))
+
+	config_set wanif_mac `get_if_parm $WANIF HWaddr 5`
+	config_set wanif_ip "0.0.0.0"
+	config_set wanif_msk "0.0.0.0"
+	config_set wanif_gw "0.0.0.0"
+	config_set wanif_domain ""
+	config_set wanif_conntime 0
+	config_set wanif_conntimes ${conntimes}
+	config_set wanif_dns1 "0.0.0.0"
+	config_set wanif_dns2 "0.0.0.0"
+	config_set lanif_mac `get_if_parm $LANIF HWaddr 5`
+}
+
+save_pppoe_file()
+{
+	config_get poe_user poe_user
+	config_get poe_pass poe_pass
+	config_get poe_sipe poe_sipe
+	config_get poe_sip poe_sip
+	config_get poe_svc poe_svc
+	config_get poe_mtu poe_mtu
+	config_get poe_idle poe_idle
+	config_get poe_auto poe_auto
+	local str=""
+
+	[ -d ${dialfile%/*} ] || mkdir ${dialfile%/*}
+	rm -f ${dialfile}
+	rm -f ${papfile}
+	rm -f ${chapfile}
+	rm -f ${pppresolvfile}
+	[ "${poe_auto}" == "2" ] && [ "${manual_onoff}" != "1" ] && config_set wanif_state ${STATE_DISCONNECTED} && exit 0
+	export "manual_onoff=0"
+cat > "${chapfile}" <<EOF
+#USERNAME  PROVIDER  PASSWORD  IPADDRESS
+"${poe_user}" * "${poe_pass}" *
+EOF
+	cp "${chapfile}" "${papfile}"
+
+	str="plugin rp-pppoe.so\n"
+	if [ "${poe_svc}" != "" ]; then
+		str=${str}"rp_pppoe_service \"${poe_svc}\"\n"
+	fi
+	str=${str}"eth0.0\n"
+	str=${str}"noipdefault\n"
+	str=${str}"ipcp-accept-local\n"
+	str=${str}"ipcp-accept-remote\n"
+	str=${str}"defaultroute\n"
+	str=${str}"replacedefaultroute\n"
+	str=${str}"hide-password\n"
+	str=${str}"noauth\n"
+	str=${str}"refuse-eap\n"
+	str=${str}"lcp-echo-interval 30\n"
+	str=${str}"lcp-echo-failure 4\n"
+
+	if [ "${dns_fix}" == "0" ]; then
+		str=${str}"usepeerdns\n"
+	else
+		[ "${dns_svr1}" != "" ] && str=${str}"ms-dns ${dns_svr1}\n"
+		[ "${dns_svr2}" != "" ] && str=${str}"ms-dns ${dns_svr2}\n"
+	fi
+
+	str=${str}"user \"${poe_user}\"\n"
+	if [ "${poe_sipe}" == "1" ]; then
+		str=${str}"${poe_sip}:\n"
+	fi
+	str=${str}"mtu ${poe_mtu}\n"
+	if [ "${poe_idle}" != "0" ]; then
+		case "${poe_auto}" in
+			0)	str=${str}"persist\n";;
+			1)	str=${str}"demand\n";;
+		esac
+		[ "${poe_auto}" == "0" ] || str=${str}"idle ${poe_idle}\n"
+	else
+		str=${str}"persist\n"
+	fi
+
+cat > "${dialfile}" <<EOF
+`echo -e "${str}"`
+EOF
+}
+
+save_pptp_file()
+{
+	config_get pptp_user pptp_user
+	config_get pptp_pass pptp_pass
+	config_get pptp_svr pptp_svr
+	config_get pptp_mtu pptp_mtu
+	config_get pptp_idle pptp_idle
+	config_get pptp_auto pptp_auto
+	config_get pptp_mppe pptp_mppe
+	local str=""
+
+	[ -d ${dialfile%/*} ] || mkdir ${dialfile%/*}
+	rm -f ${dialfile}
+	rm -f ${chapfile}
+	rm -f ${pppresolvfile}
+	[ "${pptp_auto}" == "2" ] && [ "${manual_onoff}" != "1" ] && config_set wanif_state ${STATE_DISCONNECTED} && exit 0
+	export "manual_onoff=0"
+cat > "${chapfile}" <<EOF
+#USERNAME  PROVIDER  PASSWORD  IPADDRESS
+"${pptp_user}" * "${pptp_pass}" *
+EOF
+
+	str="pty \"pptp ${pptp_svr} --nolaunchpppd\"\n"
+	str=${str}"noipdefault\n"
+	str=${str}"ipcp-accept-local\n"
+	str=${str}"ipcp-accept-remote\n"
+	str=${str}"defaultroute\n"
+	str=${str}"replacedefaultroute\n"
+	str=${str}"hide-password\n"
+	str=${str}"noauth\n"
+	str=${str}"refuse-eap\n"
+	str=${str}"lcp-echo-interval 30\n"
+	str=${str}"lcp-echo-failure 4\n"
+
+	if [ "${dns_fix}" == "0" ]; then
+		str=${str}"usepeerdns\n"
+	else
+		[ "${dns_svr1}" != "" ] && str=${str}"ms-dns ${dns_svr1}\n"
+		[ "${dns_svr2}" != "" ] && str=${str}"ms-dns ${dns_svr2}\n"
+	fi
+
+	if [ "${pptp_mppe}" == "1" ]; then
+		str=${str}"mppe required\n"
+		str=${str}"mppe stateless\n"
+	fi
+
+	str=${str}"user \"${pptp_user}\"\n"
+	str=${str}"mtu ${pptp_mtu}\n"
+	if [ "${pptp_idle}" != "0" ]; then
+		case "${pptp_auto}" in
+			0)	str=${str}"persist\n";;
+			1)	str=${str}"demand\n";;
+		esac
+		[ "${pptp_auto}" == "0" ] || str=${str}"idle ${pptp_idle}\n"
+	else
+		str=${str}"persist\n"
+	fi
+
+cat > "${dialfile}" <<EOF
+`echo -e "${str}"`
+EOF
+}
+
+save_l2tp_file()
+{
+	config_get l2tp_user l2tp_user
+	config_get l2tp_pass l2tp_pass
+	config_get l2tp_svr l2tp_svr
+	config_get l2tp_mtu l2tp_mtu
+	config_get l2tp_idle l2tp_idle
+	config_get l2tp_auto l2tp_auto
+	config_get l2tp_mppe l2tp_mppe
+	local str=""
+
+	[ -d ${dialfile%/*} ] || mkdir ${dialfile%/*}
+	rm -f ${l2tpfile}
+	rm -f ${pppoptfile}
+	rm -f ${chapfile}
+	rm -f ${pppresolvfile}
+	[ "${l2tp_auto}" == "2" ] && [ "${manual_onoff}" != "1" ] && config_set wanif_state ${STATE_DISCONNECTED} && exit 0
+	export "manual_onoff=0"
+cat > "${chapfile}" <<EOF
+#USERNAME  PROVIDER  PASSWORD  IPADDRESS
+"${l2tp_user}" * "${l2tp_pass}" *
+EOF
+
+	str="global\n"
+	str=${str}"load-handler \"sync-pppd.so\"\n"
+	str=${str}"load-handler \"cmd.so\"\n"
+	str=${str}"listen-port 1701\n"
+	str=${str}"section sync-pppd\n"
+	str=${str}"lac-pppd-opts \"file ${pppoptfile}\"\n"
+	str=${str}"section peer\n"
+	str=${str}"peer ${l2tp_svr}\n"
+	str=${str}"port 1701\n"
+	str=${str}"lac-handler sync-pppd\n"
+	str=${str}"lns-handler sync-pppd\n"
+	str=${str}"hide-avps yes\n"
+	str=${str}"section cmd\n"
+
+cat > "${l2tpfile}" <<EOF
+`echo -e "${str}"`
+EOF
+
+	str="noipdefault\n"
+	str=${str}"ipcp-accept-local\n"
+	str=${str}"ipcp-accept-remote\n"
+	str=${str}"defaultroute\n"
+	str=${str}"replacedefaultroute\n"
+	str=${str}"hide-password\n"
+	str=${str}"noauth\n"
+	str=${str}"refuse-eap\n"
+	str=${str}"lcp-echo-interval 30\n"
+	str=${str}"lcp-echo-failure 4\n"
+
+	if [ "${dns_fix}" == "0" ]; then
+		str=${str}"usepeerdns\n"
+	else
+		[ "${dns_svr1}" != "" ] && str=${str}"ms-dns ${dns_svr1}\n"
+		[ "${dns_svr2}" != "" ] && str=${str}"ms-dns ${dns_svr2}\n"
+	fi
+
+	if [ "${l2tp_mppe}" == "1" ]; then
+		str=${str}"mppe required\n"
+		str=${str}"mppe stateless\n"
+	fi
+
+	str=${str}"user \"${l2tp_user}\"\n"
+	str=${str}"mtu ${l2tp_mtu}\n"
+	if [ "${l2tp_idle}" != "0" ]; then
+		case "${l2tp_auto}" in
+			0)	str=${str}"persist\n";;
+			1)	str=${str}"demand\n";;
+		esac
+		[ "${l2tp_auto}" == "0" ] || str=${str}"idle ${l2tp_idle}\n"
+	else
+		str=${str}"persist\n"
+	fi
+cat > "${pppoptfile}" <<EOF
+`echo -e "${str}"`
+EOF
+}
+
+save_bpa_file()
+{
+	config_get wan_bpa_user wan_bpa_user
+	config_get wan_bpa_pass wan_bpa_pass
+	config_get wan_bpa_serv wan_bpa_serv
+
+	rm -f ${bpafile}
+cat > "${bpafile}}" <<EOF
+username "${wan_bpa_user}"
+password "${wan_bpa_pass}"
+authserver "${wan_bpa_serv}"
+debuglevel 1
+iminheartbeatinterval 60
+EOF
+
+}
+
+save_3gmodem_file()
+{
+	config_get wan_mobile_apn     wan_mobile_apn
+	config_get wan_mobile_auto    wan_mobile_auto
+	config_get AUTOAPN wan_mobile_autoapn
+	config_get wan_mobile_dial    wan_mobile_dial
+	config_get wan_mobile_idle    wan_mobile_idle
+	config_get wan_mobile_ispin   wan_mobile_ispin
+	config_get wan_mobile_mtu     wan_mobile_mtu
+	config_get wan_mobile_optime  wan_mobile_optime
+	config_get wan_mobile_pass    wan_mobile_pass
+	config_get wan_mobile_pin     wan_mobile_pin
+	config_get wan_mobile_user    wan_mobile_user
+	config_get usbif_modemtty     usbif_modemtty
+	config_get usbif_telecom      usbif_telecom
+	[ "$usbif_modemtty" == "!ERR" -o "$usbif_modemtty" == "" ] && exit 0
+	local modem_tty="/dev/$usbif_modemtty"
+	local gcom_getpin="/etc/gcom/getpin.gcom"
+	local str=""
+
+	[ -d ${dialfile%/*} ] || mkdir ${dialfile%/*}
+	rm -f ${dialfile}
+	rm -f ${papfile}
+	rm -f ${chapfile}
+	[ "${wan_mobile_auto}" == "2" ] && [ "${manual_onoff}" != "1" ] && config_set wanif_state ${STATE_DISCONNECTED} && exit 0
+	export "manual_onoff=0"
+
+	# check PIN's status
+	local pinstatus=`$gcom_prog -d $modem_tty -s ${gcom_getpin}`
+	[ "$pinstatus" != "READY" -a "$pinstatus" != "SIM PIN" ] && {
+		kmsg3g "!!!! Unsupported case; PIN's error status is $pinstatus"
+		kmsg3g "cmd:$gcom_prog -d $modem_tty -s ${gcom_getpin}"
+		#retry when SIM busy
+		while [ "$pinstatus" == "SIM busy" ]
+		do
+			kmsg3g "get pinstatus again"
+			sleep 1
+			pinstatus=`$gcom_prog -d $modem_tty -s ${gcom_getpin}`
+		done
+		kmsg3g "pinstatus is $pinstatus"
+		if [ "$pinstatus" != "READY" -a "$pinstatus" != "SIM PIN" ]; then
+			exit 0
+		fi
+	}
+	if [ "$pinstatus" == "SIM PIN" ]; then
+		config_set wan_mobile_ispin 1
+		[ -n "${wan_mobile_pin}" ] && {
+			# set pin
+			export "PINCODE=${wan_mobile_pin}"
+			$gcom_prog -d $modem_tty -s $gcom_setpin
+			if [ $? -eq 1 ]; then
+				kmsg3g "set pin failed"
+				exit 0
+			fi
+		}
+	else
+		config_set wan_mobile_ispin 0
+	fi
+	# PIN authentication failed
+	pinstatus=`$gcom_prog -d $modem_tty -s ${gcom_getpin}`
+	[ "$pinstatus" != "READY" ] && exit 0
+	# get MCC & MNC
+	#local mcc_mnc=`$gcom_prog -d $modem_tty -s $gcom_getismi | sed -n 's/^\([0-9]\{3\}\)\([0-9]\{2\}\).*/\1,\2/p'`
+	local mcc_mnc=`$gcom_prog -d $modem_tty -s $gcom_getmccmnc`
+	local line=`sed -n "/^${mcc_mnc}/p" /etc/config/apnlist.lst`
+	#local region=`echo $line | awk -F, '{ print $7}'`
+	[ -z "$usbif_telecom" -o "$usbif_telecom" == "!ERR" ] && {
+		local tele=`echo $line | awk -F, '{ print $6}'`
+		config_set usbif_telecom "$tele"
+	}
+	# auto APN and dialup number
+	if [ $AUTOAPN -eq 1 ]; then
+		wan_mobile_dial=`echo $line | awk -F, '{ print $2}'`
+		wan_mobile_apn=`echo $line | awk -F, '{ print $3}'`
+		wan_mobile_user=`echo $line | awk -F, '{ print $4}'`
+		wan_mobile_pass=`echo $line | awk -F, '{ print $5}'`
+	fi
+	if [ $use_comgt -eq 1 ]; then
+		export "COMGTAPN=${wan_mobile_apn}"
+		export "COMGTPIN=${wan_mobile_pin}"
+		export "COMGTDIAL=${wan_mobile_dial}"
+	else
+cat > "${chatfile}" <<EOF
+TIMEOUT 10
+ABORT BUSY
+ABORT ERROR
+REPORT CONNECT
+ABORT "NO CARRIER"
+ABORT VOICE
+ABORT "NO DIALTONE"
+"" 'at+cgdcont=1,"ip","${wan_mobile_apn}"'
+"" "atd${wan_mobile_dial}"
+TIMEOUT 10
+CONNECT c
+EOF
+	fi
+
+	str=${str}"$modem_tty\n"
+	str=${str}"crtscts\n"
+	str=${str}"noauth\n"
+	str=${str}"defaultroute\n"
+	str=${str}"noipdefault\n"
+	str=${str}"nopcomp\n"
+	str=${str}"noaccomp\n"
+	str=${str}"novj\n"
+	str=${str}"nobsdcomp\n"
+	str=${str}"holdoff 10\n"
+	str=${str}"nodeflate\n"
+	if [ "${dns_fix}" == "0" ]; then
+		str=${str}"usepeerdns\n"
+	else
+		[ "${dns_svr1}" != "" ] && str=${str}"ms-dns ${dns_svr1}\n"
+		[ "${dns_svr2}" != "" ] && str=${str}"ms-dns ${dns_svr2}\n"
+	fi
+	str=${str}"user \"${wan_mobile_user}\"\n"
+	str=${str}"password \"${wan_mobile_pass}\"\n"
+	str=${str}"mtu ${wan_mobile_mtu}\n"
+	if [ "${wan_mobile_idle}" != "0" ]; then
+		case "${wan_mobile_auto}" in
+			0)	str=${str}"persist\n";;
+			1)	str=${str}"demand\n";;
+		esac
+		[ "${wan_mobile_auto}" == "0" ] || str=${str}"idle ${wan_mobile_idle}\n"
+	else
+		str=${str}"persist\n"
+	fi
+	if [ $use_comgt -eq 1 ]; then
+		str=${str}"connect \"/usr/bin/gcom -d $dialup_tty -s /etc/ppp/peers/Generic_conn.scr\"\n"
+		str=${str}"disconnect \"/usr/bin/gcom -d $hangup_tty -s /etc/ppp/peers/Generic_disconn.scr\"\n"
+	else
+		str=${str}"connect \"/usr/sbin/chat -v -r /var/log/chat.log -f ${chatfile}\"\n"
+	fi
+
+cat > "${dialfile}" <<EOF
+`echo -e "${str}"`
+EOF
+}
+
+dialup()
+{
+	# dialup by QMI
+	[ -f /tmp/cdc-wdm ] && {
+		local dev=`cat /tmp/cdc-wdm`
+		config_get AUTO wan_mobile_auto
+		config_get AUTOAPN wan_mobile_autoapn
+		if [ $AUTOAPN -eq 1 ]; then
+			local mcc_mnc=`uqmi -sd $dev --get-serving-system|awk -F, '{print $2":"$3}'|awk -F: '{print $2$4}'`
+			local line=`sed -n "/^${mcc_mnc}/p" /etc/config/apnlist.lst`
+			APN=`echo $line | awk -F, '{ print $3}'`
+			USER=`echo $line | awk -F, '{ print $4}'`
+			PASS=`echo $line | awk -F, '{ print $5}'`
+		else
+			config_get APN wan_mobile_apn
+			config_get PASS wan_mobile_pass
+			config_get USER wan_mobile_user
+		fi
+		if [ -n "$APN" ]; then
+			qmi start $dev $APN $AUTO $PASS $USER
+		else
+			echo "dialup fail: no APN"
+			return 1
+		fi
+	}
+	return 0
+}
+
+start_dhcp()
+{
+	config_get wan_dhcp_mtu wan_dhcp_mtu
+	config_get wan_dhcp_reqip wan_dhcp_reqip
+
+	local dhcp_str=""
+	ifconfig $WANBIF mtu ${wan_dhcp_mtu} up
+	if echo ${wan_dhcp_reqip} | grep -q 'ERR'; then
+		wan_dhcp_reqip=""
+	fi
+	if [ "${wan_dhcp_reqip}" != "" ]; then
+		dhcp_str="-s ${wan_dhcp_reqip}"
+	fi
+	${dhcp_prog} $WANBIF ${dhcp_str} -t 0 >/dev/null 2>/dev/null &
+}
+
+start_ppp()
+{
+	${ppp_prog} call ${dialfile##/*/} >/dev/null 2>/dev/null &
+}
+
+check_subnet() {
+	config_get lan_msk lan_msk
+	config_get wanif_msk wanif_msk
+	if [ "$lan_msk" == "$wanif_msk" ]; then
+		config_get lan_ip lan_ip
+		config_get wanif_ip wanif_ip
+		local lan_subnet=`echo $lan_ip $lan_msk | awk -F'[ .]' '{print and($1,$5)"."and($2,$6)"."and($3,$7)"."and($4,$8)}'`
+		local wan_subnet=`echo $wanif_ip $wanif_msk | awk -F'[ .]' '{print and($1,$5)"."and($2,$6)"."and($3,$7)"."and($4,$8)}'`
+		if [ "$lan_subnet" == "$wan_subnet" ]; then
+			# change LAN subnet
+			local default_lanmsk="255.255.255.0"
+			local default_lanip1="192.168.0.1"
+			local default_lanip2="192.168.169.1"
+			local default_lansubnet1=`echo $default_lanip1 $default_lanmsk | awk -F'[ .]' '{print and($1,$5)"."and($2,$6)"."and($3,$7)"."and($4,$8)}'`
+			config_set lan_msk $default_lanmsk
+			if [ "$lan_subnet" == "$default_lansubnet1" ]; then
+				config_set lan_ip $default_lanip2
+			else
+				config_set lan_ip $default_lanip1
+			fi
+			config_set smrt_change 1
+			/lib/wdk/commit
+		fi
+	fi
+}
+
+stop() {
+	clear_netstatus
+
+	if [ -z $PLUGIF -a $WANMODE -ne 9 ]; then
+		echo "wan stop fail: without ifplugd interface"
+	elif [ -z $WANIF ]; then
+		echo "wan stop fail: null wan interface($WANIF)"
+	else
+		# Do not clean cronfile and restart cron_prog here,
+		# this would stop /etc/init.d/ethprobe.
+
+		config_set wanif_state ${STATE_DISCONNECTING}
+		clear_arp_perm $WANIF
+
+		${l2tpctl_prog} "exit" >/dev/null 2>&1
+		for kprog in ${l2tp_prog##/*/} ${dhcp_prog##/*/} ${bpa_prog##/*/} ${ppp_prog##/*/}
+		do
+			killall -q -s 9 ${kprog} >/dev/null 2>&1
+		done
+
+		ifconfig $WANIF 0.0.0.0 down >/dev/null 2>&1
+		ifconfig $WANBIF 0.0.0.0 down >/dev/null 2>&1
+
+		echo "wan stop: generic opmode($OPMODE) wmode($WANMODE) ifs($WANIF)"
+	fi
+	config_set wanif_state ${STATE_DISCONNECTED}
+}
+
+start() {
+	[ -z $PLUGIF ] && [ $WANMODE -ne 9 ] && {
+		echo "wan start fail: without ifplugd interface"
+		exit 0
+	}
+	config_get wan_mode wan_mode
+	config_get usbif_find_eth usbif_find_eth
+	if [ $OPMODE -ne 1 ]; then
+		case ${wan_mode} in
+			[126])		case $OPMODE in
+							[026])	sed -i 's/WAN.*$/WAN=eth0.0/g' $FILE;;
+							[45])	sed -i 's/WAN.*$/WAN=br0/g' $FILE;;
+							[39])	sed -i 's/WAN.*$/WAN=br1/g' $FILE;;
+							[1])	sed -i 's/WAN.*$/WAN=/g' $FILE;;
+						esac
+						;;
+			[34578])	case $OPMODE in
+							[026])	sed -i 's/WAN.*$/WAN=ppp0:eth0.0/g' $FILE;;
+							3)		sed -i 's/WAN.*$/WAN=ppp0:br1/g' $FILE;;
+							*)		sed -i 's/WAN.*$/WAN=ppp0/g' $FILE;;
+						esac
+						;;
+			9)			if [ -n "${usbif_find_eth}" ]; then
+							sed -i s/WAN.*$/WAN=$usbif_find_eth/g $FILE
+						else
+							sed -i 's/WAN.*$/WAN=ppp0/g' $FILE
+						fi
+						;;
+		esac
+	else
+		case ${wan_mode} in
+			9)	if [ -n "${usbif_find_eth}" ]; then
+					sed -i s/WAN.*$/WAN=$usbif_find_eth/g $FILE
+				else
+					sed -i 's/WAN.*$/WAN=ppp0/g' $FILE
+				fi
+				;;
+			*)	sed -i 's/WAN.*$/WAN=/g' $FILE;;
+		esac
+	fi
+	sed -i '/MODE.*$/d' $FILE
+	cat >> $FILE <<EOF
+	MODE=$wan_mode
+EOF
+	. /etc/if.sh
+	if [ -z $WANIF ]; then
+		echo "wan start fail: null wan interface($WANIF)"
+		exit 0
+	fi
+
+	echo "wan start:1 generic opmode($OPMODE) wmode($WANMODE) ifs($WANIF)"
+	if [ $OPMODE -eq 6 ]; then
+		local probe=0
+		local w="eth0.0"
+		local br="br0"
+		local probeif
+
+		config_get wan_mode wan_mode
+		[ $WANMODE -eq 9 ] && probeif=$br || probeif=$w
+		ifconfig $probeif up
+		echo "wan start: probeif($probeif)"
+		smartprobe -I $probeif
+		probe=$?
+		if [ $probe -eq 0 ]; then
+			echo "wan start: no server exist"
+			if [ $WANMODE -ne 9 ]; then
+				echo "wan start: change to mobile 3G mode"
+				config_set wan_mode 9
+				config_set op_work_mode 6
+				/lib/wdk/commit
+				return 0
+			fi
+		else
+			if [ $WANMODE -eq 9 ]; then
+				echo "wan start: change to non-mobile 3G mode"
+				config_set wan_mode $probe
+				config_set op_work_mode 6
+				/lib/wdk/commit
+				return 0
+			fi
+			if [ -f $FILE ]; then
+				config_set wan_mode $probe
+				case $probe in
+					2)	echo "wan start: start DHCP"
+						sed -i 's/MODE.*$/MODE=2/g' $FILE
+						sed -i 's/WAN.*$/WAN=eth0.0/g' $FILE
+						;;
+					3)	echo "wan start: start PPPoE"
+						sed -i 's/MODE.*$/MODE=3/g' $FILE
+						sed -i 's/WAN.*$/WAN=ppp0/g' $FILE
+						;;
+					*)	echo "wan start: error!, unknow probe option($probe)"
+						return 0
+						;;
+				esac
+				. /etc/if.sh
+			else
+				echo "wan start: error!, no file exist"
+				return 0
+			fi
+		fi
+		# harmless first time init crontab.
+		sed -i -e 's;.*/etc/init.d/ethprobe$;;g' -e '/^$/d' ${cronfile}
+cat >> "${cronfile}" <<EOF
+*/1 * * * * . /etc/init.d/ethprobe
+EOF
+		killall ${cron_prog##/*/} >/dev/null 2>/dev/null
+		${cron_prog##/*/} restart -L /dev/null
+	fi
+	echo "wan start:2 generic opmode($OPMODE) wmode($WANMODE) ifs($WANIF)"
+	if [ $WANMODE -eq 9 ]; then
+		local ppp0if=""
+		ppp0if=`ifconfig|grep ppp0|sed 's/^ppp0.*$/ppp0/g'`
+		if [ -z $ppp0if ]; then
+			echo "wan start:ppp0 doesn't exist"
+		else
+			echo "wan start:ppp0 already exist"
+			return 0
+		fi
+	fi
+
+	config_get wanif_state wanif_state
+
+	config_set wanif_state ${STATE_CONNECTING}
+	[ "$wan_arpbind_enable" != "0" ] && set_arp_wan_bind
+	sed -i '//d' ${resolvfile}
+	case "${WANMODE}" in
+		1)	echo "$WANIF static ip up"
+			config_get wan_ip wan_ip
+			config_get wan_msk wan_msk
+			config_get wan_gw wan_gw
+			config_get wan_mtu wan_mtu
+			config_get wan_speed wan_speed
+			ifconfig $WANBIF ${wan_ip} netmask ${wan_msk} mtu ${wan_mtu} up
+			route add default gw ${wan_gw}
+			config_get wan_alias wan_alias
+			if [ "${wan_alias}" == "1" ]; then
+				local inum=1
+				local wan_alias_ip
+				while [ ${inum} -le ${max_alias} ]
+				do
+					config_get wan_alias_ip "wan_alias_ip${inum}"
+					wan_alias_ip=`config_chk ${wan_alias_ip}`
+					if [ "${wan_alias_ip}" != "" ]; then
+						ifconfig $WANBIF:${inum} ${wan_alias_ip} netmask ${wan_msk}
+					fi
+					inum=`expr ${inum} + 1`
+				done
+			fi
+			/etc/init.d/wan_serv up
+			config_set wanif_state ${STATE_CONNECTED}
+			;;
+		2)	echo "$WANIF dhcp up"
+			start_dhcp
+			;;
+		3)	echo "$WANIF pppoe up"
+			save_pppoe_file
+			ifconfig $WANBIF up
+			start_ppp
+			;;
+		4)	echo "$WANIF pptp up"
+			config_get pptp_if_mode pptp_if_mode
+			config_get pptp_ip pptp_ip
+			config_get pptp_msk pptp_msk
+			config_get pptp_gw pptp_gw
+			config_get pptp_id pptp_id
+			case "${pptp_if_mode}" in
+				0)	ifconfig $WANBIF ${pptp_ip} netmask ${pptp_msk} up
+					route add default gw ${pptp_gw}
+					;;
+				1)	start_dhcp;;
+			esac
+			save_pptp_file
+			start_ppp
+			;;
+		5)	echo "$WANIF l2tp up"
+			config_get l2tp_if_mode l2tp_if_mode
+			config_get l2tp_ip l2tp_ip
+			config_get l2tp_msk l2tp_msk
+			config_get l2tp_gw l2tp_gw
+			config_get l2tp_id l2tp_id
+			config_get l2tp_svr l2tp_svr
+			case "${l2tp_if_mode}" in
+				0)	ifconfig $WANBIF ${l2tp_ip} netmask ${l2tp_msk} up
+					route add default gw ${l2tp_gw}
+					;;
+				1)	start_dhcp;;
+			esac
+			save_l2tp_file
+			${l2tp_prog}
+			${l2tpctl_prog} "start-session ${l2tp_svr}" >/dev/null 2>/dev/null
+			;;
+		6)	echo "$WANIF bigpond up"
+			start_dhcp
+			save_bpa_file
+			${bpa_prog} >/dev/null 2>/dev/null
+			# I don't know how to check connection is ready for bigpond
+			# assume it is ok temporarily
+			config_set wanif_state ${STATE_CONNECTED}
+			;;
+		9)	echo "mobile-network up"
+			if [ -n "${usbif_find_eth}" ]; then
+				dialup && start_dhcp
+			else
+				save_3gmodem_file
+				start_ppp
+			fi
+			;;
+		*)	echo "$WANIF unknown up"
+			;;
+	esac
+
+}
+
+restart() {
+	stop
+	# sleep 1 is avoid the dhcpd not down clearly & cause the dhcpd can't been restart
+	sleep 1
+	start
+}
+
+boot() {
+	# do nothing, when boot
+	# ifplugd will call wan restart when interface is ready
+	config_get wan_mode wan_mode
+	if [ ${wan_mode} = 9 ]; then
+		start
+	fi
+}

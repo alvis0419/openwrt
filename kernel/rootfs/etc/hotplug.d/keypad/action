@@ -1,0 +1,4 @@
+#!/bin/sh
+RAKEY="/lib/wdk/rakey"
+
+$RAKEY key${KEY}

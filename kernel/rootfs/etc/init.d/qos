@@ -1,0 +1,192 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2013 Montage Inc.
+
+START=70
+
+. /etc/if.sh
+
+PROC="/proc/switch"
+
+#bin
+TC_BIN=tc
+IPTABLES_BIN=iptables
+
+#For tc+imq+iptables
+DEV0="imq0"
+DEV1="imq1"
+UPLINK="0"
+DOWNLINK="0"
+RATIO="100" #move battlenet from MODEM to Router
+#------------------
+
+#IP-BASED func
+ip_conf () {
+	# determine independent or share mode: md=0:independent, md=1:share mode
+	config_get lan_ip lan_ip
+	local mode=$md
+	start=`echo $sip | awk -F"." '{ printf $4 }'`
+	end=`echo $eip | awk -F"." '{ printf $4 }'`
+	lannet=`echo $lan_ip | awk -F"." '{ printf $1"."$2"."$3"." }'`
+	if [ "$mode" = "1" ]; then
+		# Set up uplink
+		# We can use prio by parm, and it defines the priority to borrow bw.
+		$TC_BIN class add dev $DEV0 parent 1:1 classid 1:${start} htb rate ${xubw}kbit prio 1
+		# echo "Setting up uplink Filters...use iptables mark"
+		$IPTABLES_BIN -t mangle -A QOS_PRE  -m iprange --src-range "$sip"-"$eip" -j MARK --set-mark "$start"
+		$TC_BIN filter add dev $DEV0 parent 1: protocol ip prio 100 handle $start fw classid 1:${start}
+
+		# Set up Downlink
+		#	echo "downlink start..."
+		$TC_BIN class add dev $DEV1 parent 2:1 classid 2:${start} htb rate ${xdbw}kbit prio 1
+		# echo "Setting up downlink Filters...use iptables mark"
+		$IPTABLES_BIN -t mangle -A QOS_POST  -m iprange --dst-range "$sip"-"$eip" -j MARK --set-mark "$start"
+		$TC_BIN filter add dev $DEV1 parent 2: protocol ip prio 100 handle $start fw classid 2:${start}
+	else
+		for num in `seq $start $end`
+		do
+			lanip=${lannet}${num}
+			# Set up uplink
+			$TC_BIN class add dev $DEV0 parent 1:1 classid 1:${num} htb rate ${xubw}kbit prio 1
+			# echo "Setting up uplink Filters...use iptables mark"
+			$IPTABLES_BIN -t mangle -A QOS_PRE -s $lanip -j MARK --set-mark "$num"
+			$TC_BIN filter add dev $DEV0 parent 1: protocol ip prio 100 handle $num fw classid 1:${num}
+			# Set up Downlink
+			#	echo "downlink start..."
+			$TC_BIN class add dev $DEV1 parent 2:1 classid 2:${num} htb rate ${xdbw}kbit prio 1
+			# echo "Setting up downlink Filters...use iptables mark"
+			$IPTABLES_BIN -t mangle -A QOS_POST -d $lanip -j MARK --set-mark "$num"
+			$TC_BIN filter add dev $DEV1 parent 2: protocol ip prio 100 handle $num fw classid 2:${num}
+		done
+	fi
+}
+
+ip_based_setup () {
+	$IPTABLES_BIN -t mangle -N QOS_PRE
+	$IPTABLES_BIN -t mangle -N QOS_POST
+	$IPTABLES_BIN -t mangle -I PREROUTING  -j QOS_PRE
+	$IPTABLES_BIN -t mangle -I POSTROUTING -j QOS_POST
+}
+
+ip_based() {
+	config_get qos_bwl_enable qos_bwl_enable
+	RULE=`echo $qos_bwl_enable | sed -e 's/&/;/g'`
+	eval $RULE
+	if [ "$en" = "1" ]; then
+		ip_based_setup
+		ifconfig $DEV0 up
+		ifconfig $DEV1 up
+		UPLINK=`expr $wurate \* $RATIO / 100`
+		DOWNLINK=`expr $wdrate \* $RATIO / 100`
+		# First Attach qdisc to the device
+		$TC_BIN qdisc add dev $DEV0 root handle 1: htb default 255 # if not hit go to 1:255
+		$TC_BIN qdisc add dev $DEV1 root handle 2: htb default 255 # if not hit go to 2:255
+		$TC_BIN class add dev $DEV0 parent 1: classid 1:1 htb rate ${UPLINK}kbit ceil ${UPLINK}kbit burst 10K prio 1
+		$TC_BIN class add dev $DEV1 parent 2: classid 2:1 htb rate ${DOWNLINK}kbit ceil ${DOWNLINK}kbit burst 10K prio 1
+		$TC_BIN class add dev $DEV0 parent 1:1 classid 1:255 htb rate ${UPLINK}kbit prio 1
+		$TC_BIN class add dev $DEV1 parent 2:1 classid 2:255 htb rate ${DOWNLINK}kbit prio 1
+		for num in `seq 1 10`
+			do
+				line=qos_bwl_acl$num
+				config_get line $line
+				[ "$line" == "!ERR" -o "$line" == "" ] && break
+				line=`echo $line | sed -e 's/&/;/g'`
+				eval $line
+				if [ "$en" = "1" ]; then
+					ip_conf
+				fi
+			done
+		$IPTABLES_BIN -t mangle -A PREROUTING -i $LANIF -j IMQ --todev 0
+		$IPTABLES_BIN -t mangle -A POSTROUTING -o $LANIF -j IMQ --todev 1
+	fi
+}
+
+pt_based () {
+#$qos_portbase_limit='en=1&p0i=100000&p0e=1000&p1i=100000&p1e=2000&p2i=100000&p2e=3000&p3i=100000&p3e=4000&p4i=100000&p4e=5000'
+	config_get qos_portbase_limit qos_portbase_limit
+	RULE=`echo $qos_portbase_limit | sed -e 's/&/;/g'`
+	eval $RULE
+	if [ "$en" = "1" ]; then
+		echo qos $p0i $p0e $p1i $p1e $p2i $p2e $p3i $p3e $p4i $p4e > $PROC
+	fi
+}
+
+dscp () {
+# $qos_dscp_weight='en=1&hi=15&mi=15&lo=15'
+# $qos_dscp_rule1='en=1&dscp=1&qnum=1&comm='
+	config_get qos_dscp_weight qos_dscp_weight
+	RULE=`echo $qos_dscp_weight | sed -e 's/&/;/g'`
+	eval $RULE
+	if [ "$en" = "1" ]; then
+		echo dscp weight $hi $mi $lo > $PROC
+		for num in `seq 1 10`
+		do
+			rule=qos_dscp_rule$num
+			config_get rule $rule
+			[ "$rule" == "!ERR" -o "$rule" == "" ] && break
+			rule=`echo $rule | sed -e 's/&/;/g'`
+			eval $rule
+			if [ "$en" = "1" ]; then
+				echo dscp rule $dscp $qnum > $PROC
+			fi
+		done
+	fi
+}
+
+ip_based_clear () {
+	$TC_BIN qdisc del dev $DEV0 root
+	$TC_BIN qdisc del dev $DEV1 root
+	$IPTABLES_BIN -t mangle -D PREROUTING -i $LANIF -j IMQ --todev 0
+	$IPTABLES_BIN -t mangle -D POSTROUTING -o $LANIF -j IMQ --todev 1
+	$IPTABLES_BIN -t mangle -F QOS_PRE
+	$IPTABLES_BIN -t mangle -D PREROUTING -j QOS_PRE
+	$IPTABLES_BIN -t mangle -X QOS_PRE
+	$IPTABLES_BIN -t mangle -F QOS_POST
+	$IPTABLES_BIN -t mangle -D POSTROUTING -j QOS_POST
+	$IPTABLES_BIN -t mangle -X QOS_POST
+}
+
+pt_based_clear () {
+	echo qos clear > $PROC
+}
+
+dscp_clear () {
+	echo dscp clear > $PROC
+}
+
+clearall () {
+	ip_based_clear
+	pt_based_clear
+	dscp_clear
+}
+
+start () {
+	config_get qos_mode qos_mode
+	case $qos_mode in
+		1) ip_based;;
+		2) pt_based;;
+		3) dscp;;
+	esac
+}
+
+stop () {
+	clearall
+}
+
+display () {
+echo "Display qdisc..."
+$TC_BIN -s qdisc show dev $DEV0
+$TC_BIN -s qdisc show dev $DEV1
+echo "------------------------"
+echo "Dsiplay class..."
+$TC_BIN -s class show dev $DEV0
+$TC_BIN -s class show dev $DEV1
+echo "------------------------"
+echo "Dsiplay filter..."
+$TC_BIN filter show dev $DEV0
+$TC_BIN filter show dev $DEV1
+echo "------------------------"
+echo "Display iptables mark..."
+$IPTABLES_BIN -t mangle -L -n
+echo "DONE"
+
+}

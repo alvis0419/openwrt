@@ -1,0 +1,9 @@
+#!/bin/sh
+# Copyright (C) 2015 Montage Inc.
+[ "${DEVNAME#cdc-wdm}" != "$DEVNAME" ] && {
+	if [ "add" = "$ACTION" ]; then
+		echo "/dev/$DEVNAME" > /tmp/cdc-wdm
+	else #remove
+		rm -f /tmp/cdc-wdm
+	fi
+}

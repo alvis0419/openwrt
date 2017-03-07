@@ -1,0 +1,133 @@
+Package: libc
+Status: install ok installed
+Root: /
+Version: -42
+Architecture: montage
+
+Package: libgcc
+Status: install ok installed
+Root: /
+Version: -42
+Architecture: montage
+
+Package: libpthread
+Status: install ok installed
+Root: /
+Version: -42
+Architecture: montage
+
+Package: librt
+Status: install ok installed
+Root: /
+Version: -42
+Architecture: montage
+
+Package: busybox
+Status: install ok installed
+Root: /
+Version: 1.15.3-2
+Architecture: montage
+
+Package: dhcpcd
+Status: install ok installed
+Root: /
+Version: 3.0.17-1
+Architecture: montage
+
+Package: dnsmasq
+Status: install ok installed
+Root: /
+Version: 2.52-2
+Architecture: montage
+
+Package: hostapd
+Status: install ok installed
+Root: /
+Version: 20130405-1
+Architecture: montage
+
+Package: hostapd-utils
+Status: install ok installed
+Root: /
+Version: 20130405-1
+Architecture: montage
+
+Package: wpa-supplicant
+Status: install ok installed
+Root: /
+Version: 20130405-1
+Architecture: montage
+
+Package: hotplug2
+Status: install ok installed
+Root: /
+Version: 1.0-beta-1
+Architecture: montage
+
+Package: iptables
+Status: install ok installed
+Root: /
+Version: 1.4.6-2
+Architecture: montage
+
+Package: libiptc
+Status: install ok installed
+Root: /
+Version: 1.4.6-2
+Architecture: montage
+
+Package: libxtables
+Status: install ok installed
+Root: /
+Version: 1.4.6-2
+Architecture: montage
+
+Package: iw
+Status: install ok installed
+Root: /
+Version: 3.6-1
+Architecture: montage
+
+Package: kernel
+Status: install ok installed
+Root: /
+Version: 2.6.32.11.p-1
+Architecture: montage
+
+Package: kmod-fuse
+Status: install ok installed
+Root: /
+Version: 2.6.32.11.p-1
+Architecture: montage
+
+Package: libnl-tiny
+Status: install ok installed
+Root: /
+Version: 0.1-3
+Architecture: montage
+
+Package: rootfs
+Status: install ok installed
+Root: /
+Conffiles: /etc/config/apnlist.lst 4cd80c2e4179003d6b250bb072f690b4 /etc/config/cdb.dep 4631d394312c23e687810dd7b8bf5af4 /etc/config/modem.lst a7b5f70dbd32d4885d317023fae5d449 /etc/config/oom_disable.lst edc822629d55328e5c0bf9b12c47df81
+Version: 1
+Architecture: montage
+
+Package: omnicfg
+Status: install ok installed
+Root: /
+Version: 1
+Architecture: montage
+
+Package: udevtrigger
+Status: install ok installed
+Root: /
+Version: 106-1
+Architecture: montage
+
+Package: libiw
+Status: install ok installed
+Root: /
+Version: 29-4
+Architecture: montage
+

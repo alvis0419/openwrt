@@ -1,0 +1,20 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2013 Montage Inc.
+# OpenWrt.BOOT
+
+START=15
+
+local CRON_PROG="crond"
+local CRONFILE="/etc/crontabs/root"
+
+start() {
+	rm -f $CRONFILE
+cat > "$CRONFILE" <<EOF
+# m h dom mon dow command
+EOF
+	$CRON_PROG
+}
+
+stop() {
+	start-stop-daemon -K -skill -x$CRON_PROG
+}

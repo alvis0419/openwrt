@@ -1,0 +1,21 @@
+#!/bin/sh
+
+on() {
+	echo 0 > /proc/madc
+	wd pwr up
+}
+
+off() {
+	echo 1 > /proc/madc
+	wd pwr dn
+}
+
+info() {
+	wd pwr info
+}
+
+case $1 in
+	on) on;;
+	off) off;;
+	info) info;;
+esac

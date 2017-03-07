@@ -1,0 +1,28 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006 OpenWrt.org
+# OpenWrt.BOOT
+
+START=95
+boot() {
+	[ -d /tmp/root ] && {
+		lock /tmp/.switch2jffs
+		firstboot switch2jffs
+		lock -u /tmp/.switch2jffs
+		touch /tmp/root/done
+		[ -x /etc/init.d/usb ] && {
+			/etc/init.d/usb start
+		}
+	}
+
+	# process user commands
+	[ -f /etc/rc.local ] && {
+		sh /etc/rc.local
+	}
+
+	# set leds to normal state
+	. /etc/diag.sh
+	set_state done
+	config_get cpuclk chip_cpu
+	config_get sysclk chip_sys
+	clk $cpuclk $sysclk
+}

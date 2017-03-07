@@ -1,0 +1,35 @@
+#!/bin/sh
+
+if [ $# = 0 ]; then
+	echo -e "Usage:\nwt [parm]\n
+parm:
+    wt start (start the program)
+    stop (force to stop)
+    cfg (show all configuration)
+    chan <channel_num> <second channel: 1:Above, 3:Below>
+    txrate <1~4:CCK, 5~12:OFDM, 13~20:MCS> (fixed TX rate)
+    tx_gf <0/1> (Green Field)
+    tx_sp <0/1> (Short Preamble)
+    tx_sgi <0/1> (Short Guard Interval)
+    filter <MT:0x1, beacon:0x2, mgt:0x4, ctrl:0x8, data:0x10, bcast:0x20> (RX desired packet)
+    dump <0: no show, 0x1:simple, 0x2:payload> (dump RX packet)
+    addr <aa:bb:cc:dd:ee:ff> (peer STA's mac address)
+    stat
+    rx <drop|echo> <expect num>
+    tx <count>/repeat <payload_length> <burst> <echo>
+    bbcnt
+    rssi
+    txvga <value>/save
+    fofs <value>/save"
+	return
+fi
+
+[ -f /sbin/wlcmd ] &&
+{
+	wlcmd wt $@
+} ||
+{
+	echo $@ > /proc/wt
+	cat /proc/wt
+}
+

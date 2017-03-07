@@ -1,0 +1,34 @@
+#!/bin/sh
+
+mv /dev/random /dev/random.orig
+ln -s /dev/urandom /dev/random
+
+cat > "/hostapd.conf" <<EOF
+interface=wlan0
+driver=nl80211
+
+hw_mode=g
+channel=1
+ssid=mac80211 test
+
+wpa=2
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=CCMP
+wpa_passphrase=12345678
+EOF
+
+cat > "/wpa_supplicant.conf" <<EOF
+network={
+ssid="mac80211 test"
+psk="12345678"
+key_mgmt=WPA-PSK
+proto=WPA2
+pairwise=CCMP
+group=CCMP
+}
+EOF
+
+start-stop-daemon -S -x /usr/sbin/hostapd -- -B -P /var/run/hostapd.pid /hostapd.conf
+sleep 3
+wpa_supplicant -Dnl80211 -iwlan1 -c /wpa_supplicant.conf
+

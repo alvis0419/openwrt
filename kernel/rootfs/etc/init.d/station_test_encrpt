@@ -1,0 +1,14 @@
+#!/bin/sh
+
+cat > "/wpa_supplicant.conf" <<EOF
+network={
+ssid="1x1"
+key_mgmt=WPA-PSK
+proto=RSN
+psk="12345678"
+pairwise=CCMP
+group=CCMP
+}
+EOF
+
+wpa_supplicant -Dnl80211 -iwlan0 -c /wpa_supplicant.conf &

@@ -1,0 +1,87 @@
+#!/bin/sh /etc/rc.common
+
+START=42
+STOP=89
+
+. /etc/if.sh
+
+GPIOPATH="/sys/devices/platform/cta-gpio/gpio"
+hostapd_cli_actionfile="/tmp/hostapd_cli_action"
+hostapd_cli_pidfile="/var/run/hostapd_cli.pid"
+hostapd_cli_cmdline="-a $hostapd_cli_actionfile"
+hostapd_cli_bin="/usr/sbin/hostapd_cli"
+
+setup_action_file ()
+{
+	local mac=$2
+	local gpio=$3
+	local file=$1
+
+    cat > "$file" <<EOF
+#!/bin/ash
+#
+# cdb: $5
+#
+mode=$4
+[ "\$3" = "`echo $mac|tr A-Z a-z`" ] && {
+	[ "\$2" = "AP-STA-CONNECTED" ] && sw=0
+	[ "\$2" = "AP-STA-DISCONNECTED" ] && sw=1
+	on=\$(( \$sw ^ \$mode ))
+ 	echo \$on > /sys/class/gpio/gpio${gpio}/value
+}
+
+EOF
+	chmod a+x $file
+}
+
+hostapd_cli_start()
+{
+	local gpio=33
+	local en=0
+	config_get rule wl_mac_gpio
+	line=`echo $rule | sed -n 's/&/;/gp'`
+	[ -z "$line" ] && {
+		echo "No wl_mac_gpio cdb"
+		return 2
+	}
+
+	eval $line
+
+
+	[ -e $hostapd_cli_pidfile ] && {
+		echo "Already run pid:`cat $hostapd_cli_pidfile`, can't start again"
+		return 1
+	}
+	[ $gpio -lt 33 ] && {
+		[ "$en" = "0" ] && return 0
+		# 1 : active high, 2 : active low
+		on=$(( $en & 1 ))
+		echo  Setup GPIO${gpio} for "$mac"
+		[ -d ${GPIOPATH}/gpio${gpio} ] || {
+			echo $gpio > /sys/class/gpio/export
+		}
+		echo out > /sys/class/gpio/gpio${gpio}/direction
+		echo $(( !$on )) > /sys/class/gpio/gpio${gpio}/value
+	} || {
+		echo "Incorrect setting : ${rule} !!"
+		return 2
+	}
+	setup_action_file $hostapd_cli_actionfile $mac $gpio $(($en & 1)) "en=${en};mac=${mac};gpio=${gpio}"
+	start-stop-daemon -S -b -m -p $hostapd_cli_pidfile -x $hostapd_cli_bin -- $hostapd_cli_cmdline
+}
+
+hostapd_cli_stop()
+{
+	[ -e $hostapd_cli_actionfile ] && {
+		rule=`sed -n 's/# cdb: //p' $hostapd_cli_actionfile`
+		eval "$rule"
+		echo relase GPIO${gpio}
+		echo in > /sys/class/gpio/gpio${gpio}/direction
+		echo $gpio > /sys/class/gpio/unexport
+		rm -f $hostapd_cli_actionfile
+	}
+	[ -e $hostapd_cli_pidfile ] && {
+		start-stop-daemon -K -p $hostapd_cli_pidfile -q
+		rm -f $hostapd_cli_pidfile
+	}
+}

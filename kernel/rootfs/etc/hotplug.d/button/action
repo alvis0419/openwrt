@@ -1,0 +1,47 @@
+#!/bin/sh
+
+line=`cat /etc/gpioconf | grep ${BUTTON}`
+eval ${line}
+eval BTN=$`echo ${BUTTON}`
+parm=`echo ${BTN} | sed 's/&/;/g'`
+eval ${parm}
+
+button0() {
+	if [ ${SEEN} -ge $delay ]; then
+		/lib/wdk/cdbreset
+	fi
+	[ -f /var/run/upmpdcli.br0 ] && {
+	    pid=`cat /var/run/upmpdcli.br0`
+	    kill -USR1 ${pid}
+	}
+	[ -f /var/run/upmpdcli.br1 ] && {
+	    pid=`cat /var/run/upmpdcli.br1`
+	    kill -USR1 ${pid}
+	}
+	/sbin/reboot
+}
+
+button1() {
+	. /etc/if.sh
+	if [ ${SEEN} -ge $delay ]; then
+		/lib/wdk/omnicfg_ctrl trigger
+	else
+		if [ "$HOSTAPD" = "1" ]; then
+			exec hostapd_cli wps_pbc
+		elif [ "$WPASUP" == "1" ]; then
+			exec wpa_cli wps_pbc
+		fi
+	fi
+}
+
+button2() {
+	/lib/wdk/rakey switch ${COUNT}
+}
+
+case ${BUTTON} in
+	BTN_0) button0 ;;
+	BTN_1) button1 ;;
+	BTN_2) button2 ;;
+#	BTN_3)
+#	BTN_4)
+esac

@@ -1,0 +1,14 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2013 Montage Inc.
+# OpenWrt.BOOT
+
+START=20
+
+local commit_prog="/lib/wdk/commit"
+
+start() {
+	if [ -x ${commit_prog} ]; then
+		${commit_prog} $1
+	fi
+}
+

@@ -1,0 +1,11 @@
+#!/bin/sh
+# Copyright (C) 2013 Montage Inc.
+
+add_disk() {
+    ''/lib/wdk/sysupgrade "auto" "${DEVNAME}" 2> /dev/null &''
+}
+
+[ "${DEVTYPE}" == "disk" ] || exit 0
+[ "${ACTION}" == "add" ] && add_disk
+
+exit 0

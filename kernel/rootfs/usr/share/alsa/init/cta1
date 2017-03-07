@@ -1,0 +1,52 @@
+CARDINFO{name}=="cta-pcm1-wm8750", GOTO="pcm1_wm8750"
+CARDINFO{name}=="cta-pcm1-wm8988", GOTO="pcm1_wm8988"
+CARDINFO{name}=="cta-pcm1-nau8822", GOTO="pcm1_nau8822"
+CARDINFO{name}=="cta-pcm1-mp320", GOTO="pcm1_mp320"
+CARDINFO{name}=="cta-pcm1-wm8737", GOTO="pcm1_wm8737"
+RESULT="false", EXIT="return"
+
+LABEL="pcm1_wm8750"
+CTL{reset}="mixer"
+# playback
+CTL{name}="Left Mixer Playback Switch", CTL{value}="on"
+CTL{name}="Right Mixer Playback Switch", CTL{value}="on"
+CTL{name}="PCM Volume", CTL{value}="224,224"
+# capture
+CTL{name}="Capture Switch", CTL{value}="on,on"
+CTL{name}="Mic Boost", CTL{value}="2"
+CTL{name}="Capture Volume", CTL{value}="60,60"
+CTL{name}="ALC Capture Function", CTL{value}="3"
+RESULT="true", EXIT="return"
+
+LABEL="pcm1_wm8988"
+CTL{reset}="mixer"
+# playback
+CTL{name}="Left Mixer Playback Switch", CTL{value}="on"
+CTL{name}="Right Mixer Playback Switch", CTL{value}="on"
+CTL{name}="PCM Volume", CTL{value}="224,224"
+# capture
+CTL{name}="Capture Switch", CTL{value}="on,on"
+RESULT="true", EXIT="return"
+
+LABEL="pcm1_nau8822"
+CTL{reset}="mixer"
+#playback
+CTL{name}="PCM Volume", CTL{value}="255,255"
+# capture
+CTL{name}="Aux Boost Volume", CTL{value}="5"
+CTL{name}="L2/R2 Boost Volume", CTL{value}="5"
+CTL{name}="ADC Volume", CTL{value}="230,230"
+RESULT="true", EXIT="return"
+
+LABEL="pcm1_mp320"
+CTL{reset}="mixer"
+# capture
+CTL{name}="Capture Switch", CTL{value}="on,on"
+CTL{name}="Capture Volume", CTL{value}="23,23"
+RESULT="true", EXIT="return"
+
+LABEL="pcm1_wm8737"
+CTL{reset}="mixer"
+# capture
+RESULT="true", EXIT="return"
+

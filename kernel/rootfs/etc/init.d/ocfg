@@ -1,0 +1,77 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2015 Montage Inc.
+# OpenWrt.BOOT
+
+START=94
+
+. /etc/cdb.sh
+. /etc/if.sh
+
+publish_program="/lib/wdk/omnicfg-publish-service"
+
+start() {
+	local ipaddr
+	local vendor_id
+	local product_id
+	local omi_result
+	local new_conf
+	local arg
+	local cmd
+
+	for i in `seq 1 100`
+	do
+		mac=`cat /proc/bootvars | grep mac0 | cut -b 6- | sed s/://g`
+		[ `echo $mac | wc -c` == 13 ] && break || echo retry $i times
+	done
+
+        config_get ipaddr lan_ip
+        config_get vendor_id sw_vid
+        config_get product_id sw_pid
+        config_get omi_result omi_result
+
+	[ "$omi_result" == "!ERR" ] && omi_result=0
+	if [ "$OPMODE" == "8" ] || [ "$OPMODE" == "9" ]; then
+	        arg=""omi_result=$omi_result" "sw_vid=$vendor_id" "sw_pid=$product_id" "lan_ip=""
+		ipaddr=""
+	else
+	        arg=""omi_result=$omi_result" "sw_vid=$vendor_id" "sw_pid=$product_id" "lan_ip=$ipaddr""
+	fi
+
+	if [ -n "$1" -a "$1" == "1" ]; then
+		new_conf=1
+	else
+		new_conf=0
+	fi
+
+	#[ "$OPMODE" -le "5" ] && cdbak save
+
+	time=`cat /proc/uptime | cut -d '.' -f1`
+#	echo $time
+	arg=""$arg" "version=$time""
+
+#	echo $ipaddr $arg
+
+#      	"$OMNICFG_PUBLISH_SERVICE_PATH$OMNICFG_PUBLISH_SERVICE_NAME" \
+#      		"OMNICFG@$mac" _omnicfg._tcp 80 $arg &
+#	if [ -x ${publish_program} ]; then
+#	      	start-stop-daemon -S -x ${publish_program} OMNICFG@${mac} _omnicfg._tcp 80 ${arg} -b 2>/dev/null
+#	else
+#     		echo publish fail
+#	fi
+
+	cmd='start-stop-daemon -S -x omnicfg_broadcast "{\"ver\":\"1\",\"name\":\"OMNICFG@$mac\",\"omi_result\":\"$omi_result\",\"sw_vid\":\"$vendor_id\",\"sw_pid\":\"$product_id\",\"lan_ip\":\"$ipaddr\",\"version\":\"$time\",\"new_conf\":\"$new_conf\"}" "{\"ver\":\"1\",\"name\":\"OMNICFG@$mac\",\"omi_result\":\"$omi_result\",\"sw_vid\":\"$vendor_id\",\"sw_pid\":\"$product_id\",\"lan_ip\":\"$ipaddr\",\"version\":\"$time\",\"new_conf\":\"0\"}" 60 -b'
+
+	eval $cmd
+	logger ocfg start--"$cmd"
+}
+
+stop() {
+#	killall omnicfg-publish-service
+	killall -SIGHUP omnicfg_broadcast
+	logger ocfg stop
+}
+
+restart() {
+	stop $@
+	start $@
+}

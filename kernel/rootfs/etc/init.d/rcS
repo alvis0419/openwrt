@@ -1,0 +1,31 @@
+#!/bin/sh
+# Copyright (C) 2006 OpenWrt.org
+
+. /etc/cdb.sh
+
+run_scripts() {
+	local START=0
+	local END=$(mydate)
+	local DIFF=0
+	for i in /etc/rc.d/$1*; do
+		START=${END}
+		[ -x $i ] && $i $2 $2 2>&1
+		END=$(mydate)
+		DIFF=$(mydiff ${END} ${START})
+		echo "$i used time: ${DIFF}"
+		[ -x /usr/bin/mcc_key ] && mcc_key b
+	done | $LOGGER
+	echo 1 > /tmp/boot_done
+	echo "all done" `date` | $LOGGER
+	echo "all done" `date`
+}
+
+[ -x /usr/bin/tee ] && LOGGER="tee -a /tmp/rcS.log"
+LOGGER="cat"
+[ -x /usr/bin/logger ] && LOGGER="logger -s -p 6 -t sysinit"
+
+if [ "$1" = "S" ]; then
+	run_scripts "$1" "$2" &
+else
+	run_scripts "$1" "$2"
+fi

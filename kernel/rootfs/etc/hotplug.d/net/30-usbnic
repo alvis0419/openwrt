@@ -1,0 +1,79 @@
+#!/bin/ash
+# Copyright (C) 2013 Montage Inc.
+
+. /etc/cdb.sh
+if [ -f /tmp/rule ]; then
+	. /tmp/rule
+else
+	config_get MODE wan_mode
+	config_get OP op_work_mode
+fi
+
+local MOB_MODEM=9
+local OP_SMART=6
+local OP_MB=7
+
+local wan_script="/etc/init.d/wan"
+local dbg_file="/var/log/usb_nic_hotplug.log"
+
+dbg_reinit() {
+	env >> ${dbg_file}
+}
+
+dbg_init() {
+	rm -f ${dbg_file}
+	dbg_reinit
+}
+
+dbg() {
+	echo "$*" >> ${dbg_file}
+}
+
+restart_prog() {
+	# try to start wan script
+	if [ -x "${wan_script}" ]; then
+		``${wan_script} "restart" &``
+		dbg "restart wan script"
+	fi
+}
+
+stop_prog() {
+	# try to stop wan script
+	if [ -x "${wan_script}" ]; then
+		``${wan_script} "stop"``
+		dbg "stop wan script"
+	fi
+}
+
+check_usbnic_attach() {
+	config_set usbif_find_eth $INTERFACE
+	if [ $MODE == "$MOB_MODEM" ]; then
+		if [ $OP == "$OP_SMART" ] || [ $OP == "$OP_MB" ]; then
+			dbg_init
+			dbg "check USB NIC attach"
+			restart_prog
+		fi
+	fi
+}
+
+check_usbnic_detach() {
+	config_set usbif_find_eth
+	dbg "check USB NIC detach"
+	dbg_reinit
+	if [ $MODE == "$MOB_MODEM" ]; then
+		if [ $OP == "$OP_SMART" ] || [ $OP == "$OP_MB" ]; then
+			stop_prog
+		fi
+	fi
+}
+
+case "$DEVPATH" in
+	*usb*)
+		case "$ACTION" in
+			add) check_usbnic_attach;;
+			remove) check_usbnic_detach;;
+		esac
+		;;
+esac
+
+exit 0

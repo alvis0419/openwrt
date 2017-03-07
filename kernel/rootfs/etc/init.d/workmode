@@ -1,0 +1,682 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2013 Montage Inc.
+
+START=11
+
+. /etc/cdb.sh
+. /etc/if.sh
+
+ETHER="eth0."
+BR="br0"
+BR1="br1"
+AP="wlan0"
+STA="sta0"
+VIDW=0
+VIDL=4095
+
+#calibrate ether port
+IFACE=""
+PKTCOUNT=3
+PROCFS="/proc/eth"
+PROCWLA="/proc/wla"
+IP="8.8.8.8"
+local probe_prog="/etc/init.d/brgprobe"
+
+# Working FILE
+#	HOSTAPD=1		# for wlan script.		hostapd bin should use
+#	WPASUP=1		# for wlan script.		wpa_supplicant bin should use
+#	AP=$AP			# for wlan script.		WiFi AP interface
+#	STA=$STA		# for wlan script.		WiFi STA interface
+#	IFPLUGD			# for if script.		monitor interface of wan
+#	MODE			# for if script.		current wan mode
+#	OP				# for if script.		current work mode
+#											0: debug mode
+#											1: AP router(disable nat/dhcp)
+#											2: Wifi router
+#											3: WISP mode
+#											4: Repeater mode(disable nat/dhcp)
+#											5: Bridge mode(disable nat/dhcp)
+#											6: Smart WAN
+#											7: Mobile 3G
+#											8: P2P
+#											9: Pure Client mode
+
+LMAC=`cat /proc/bootvars | grep mac0 | cut -b 6-`
+WMAC=`cat /proc/bootvars | grep mac1 | cut -b 6-`
+STAMAC=`cat /proc/bootvars | grep mac2 | cut -b 6-`
+
+mac_msb() {
+	echo "${1}" | awk -F":" '{print $1":"$2":"$3}'
+}
+
+mac_lsb() {
+	echo "${1}" | awk -F":" '{print $4":"$5":"$6}'
+}
+
+mac_modified() {
+	config_get wan_clone_mac_enable wan_clone_mac_enable
+	config_get wan_clone_mac wan_clone_mac
+	config_get op_work_mode op_work_mode
+
+	local mac1=`mac_msb "${wan_clone_mac}"`
+	if	[ "${wan_clone_mac_enable}" = "1" ] ; then
+		LMAC=${mac1}":"`mac_lsb "${LMAC}"`
+		WMAC="${wan_clone_mac}"
+		if [ "${op_work_mode}" = "3" ]; then
+			STAMAC="${wan_clone_mac}"
+		else
+			STAMAC=${mac1}":"`mac_lsb "${STAMAC}"`
+		fi
+	fi
+}
+
+get_wanmode() {
+	config_get wan_mode wan_mode
+	echo $wan_mode
+}
+
+calculate ()
+{
+	rx_cnt=`cat /sys/class/net/${IFACE}/statistics/rx_packets`
+	arping -c $PKTCOUNT $IP -I $IFACE
+	nrx_cnt=`cat /sys/class/net/${IFACE}/statistics/rx_packets`
+	diff=`expr $nrx_cnt - $rx_cnt`
+	[ $diff -ge $PKTCOUNT ] && return 0 || return 1
+}
+
+clbr_start () {
+	echo calibrate $1 $2 $3 > $PROCFS
+	calculate $IFACE
+	if [ $? = 0 ]; then
+		echo loopback $1 stop > $PROCFS
+		return 0
+	else
+		return 1
+	fi
+}
+
+clbr () {
+	echo loopback $1 start > $PROCFS
+	sleep 3;
+
+	clbr_start $1 0 1 && return 0
+	clbr_start $1 0 0 && return 0
+	clbr_start $1 1 0 && return 0
+	clbr_start $1 1 1 && return 0
+
+	echo loopback $1 stop > $PROCFS
+	sleep 3;
+	return 0
+}
+
+cfg_lan_mac () {
+	ifconfig $BR hw ether $LMAC |
+	ifconfig eth0 hw ether $LMAC |
+	ifconfig $AP hw ether $LMAC
+}
+
+reload () {
+	echo sclk > $PROCFS
+	if [ $1 -eq 1 ]; then
+		echo 8021q 0fff000b > $PROCFS |
+		echo 8021q 00008100 > $PROCFS |
+		echo bssid 0fff0000 > $PROCFS |
+		echo epvid 0fff0100 > $PROCFS |
+		echo epvid 0fff0200 > $PROCFS |
+		echo epvid 0fff0000 > $PROCFS |
+		echo wmode 0 > $PROCFS |
+		echo swctl 1 > $PROCFS
+	elif [ $1 -eq 0 ]; then
+		echo 8021q 0fff000e > $PROCFS |
+		echo 8021q 00008105 > $PROCFS |
+		echo epvid 0fff0100 > $PROCFS |
+		echo epvid 00000000 > $PROCFS |
+		echo epvid 0fff0200 > $PROCFS |
+		echo bssid 0fff0000 > $PROCFS |
+		echo wmode 0 > $PROCFS |
+		echo swctl 1 > $PROCFS
+	fi
+}
+
+cfg_id () {
+	[ "$1" = "$AP" ] && echo "config.apid=$2" > $PROCWLA
+	[ "$1" = "$STA" ] && echo "config.staid=$2" > $PROCWLA
+}
+
+forward_mode () {
+	config_get wl_def_forward_mode wl_def_forward_mode
+	config_set wl_forward_mode $wl_def_forward_mode
+}
+
+db_mode () {
+	#Forwarding mode
+	forward_mode
+	
+	config_set wl_bss_role2 0
+
+	# Bridge
+	brctl addbr $BR
+
+	# Vlan iinterface
+	vconfig add eth0 ${VIDL} |
+	vconfig add eth0 ${VIDW}
+
+	# Add ether iface in br0
+	brctl addif $BR ${ETHER}${VIDL}
+
+	# Bring up eth interface to do calibration
+	ifconfig ${ETHER}${VIDL} up |
+	ifconfig ${ETHER}${VIDW} up |
+	ifconfig eth0 up |
+	ifconfig $BR up
+
+	# Config mac address
+	cfg_lan_mac
+
+	# Config mac address
+	ifconfig ${ETHER}${VIDW} hw ether $WMAC
+
+	# Config wifi
+	# reference to chechup script
+
+	# Generate working file
+	cat > "$FILE" <<EOF
+	LAN=$BR
+	WAN=
+	HOSTAPD=1
+	AP=$AP
+	BRAP=$BR
+	IFPLUGD=${ETHER}${VIDW}
+	MODE=`get_wanmode`
+	OP=$op_work_mode
+	LMAC=$LMAC
+	WMAC=$WMAC
+	STAMAC=$STAMAC
+EOF
+	reload 0
+	#IFACE=${ETHER}${VIDL}
+	#clbr 1
+	#IFACE=${ETHER}${VIDW}
+	#clbr 0
+	ifplugd -u 0 -d 0 -p -q -i ${ETHER}${VIDL}
+	ifplugd -u 0 -d 0 -p -q -i ${ETHER}${VIDW}
+}
+
+ap_mode () {
+	#Forwarding mode
+	forward_mode
+
+	config_set wl_bss_role2 0
+
+	# Bridge
+	brctl addbr $BR
+
+	# Vlan iinterface
+	vconfig add eth0 ${VIDL}
+
+	# Add ether iface in br0
+	brctl addif $BR ${ETHER}${VIDL}
+
+	# Bring up eth interface to do calibration
+	ifconfig ${ETHER}${VIDL} up |
+	ifconfig eth0 up |
+	ifconfig $BR up
+
+	# Config mac address
+	cfg_lan_mac
+
+	# Config wifi
+	# reference to chechup script
+
+	# Generate working file
+	cat > "$FILE" <<EOF
+	LAN=$BR
+	WAN=
+	HOSTAPD=1
+	AP=$AP
+	BRAP=$BR
+	MODE=`get_wanmode`
+	OP=$op_work_mode
+	LMAC=$LMAC
+	WMAC=$WMAC
+	STAMAC=$STAMAC
+EOF
+	echo sclk > $PROCFS |
+	echo 8021q 0fff000e > $PROCFS |
+	echo epvid 0fff0100 > $PROCFS |
+	echo epvid 0fff0200 > $PROCFS |
+	echo bssid 0fff0000 > $PROCFS |
+	echo wmode $op_work_mode > $PROCFS |
+	echo swctl 1 > $PROCFS
+	#IFACE=${ETHER}${VIDL}
+	#clbr 1
+	ifplugd -u 0 -d 0 -p -q -i ${ETHER}${VIDL}
+}
+
+wr_mode () {
+	#Forwarding mode
+	forward_mode
+	
+	config_set wl_bss_role2 0
+
+	# Bridge
+	brctl addbr $BR
+
+	# Vlan iinterface
+	vconfig add eth0 ${VIDL} |
+	vconfig add eth0 ${VIDW}
+
+	# Add ether iface in br0
+	brctl addif $BR ${ETHER}${VIDL}
+
+	# Bring up eth interface to do calibration
+	ifconfig ${ETHER}${VIDL} up |
+	ifconfig ${ETHER}${VIDW} up |
+	ifconfig eth0 up |
+	ifconfig $BR up
+
+	# Config mac address
+	cfg_lan_mac
+
+	# Config mac address
+	ifconfig ${ETHER}${VIDW} hw ether $WMAC
+
+	# Config wifi
+	# reference to chechup script
+
+	# Generate working file
+	cat > "$FILE" <<EOF
+	LAN=$BR
+	WAN=
+	HOSTAPD=1
+	AP=$AP
+	BRAP=$BR
+	IFPLUGD=${ETHER}${VIDW}
+	MODE=`get_wanmode`
+	OP=$op_work_mode
+	LMAC=$LMAC
+	WMAC=$WMAC
+	STAMAC=$STAMAC
+EOF
+	echo sclk > $PROCFS |
+	echo 8021q 0fff000c > $PROCFS |
+	echo 8021q 00008106 > $PROCFS |
+	echo epvid 00000100 > $PROCFS |
+	echo epvid 0fff0200 > $PROCFS |
+	echo bssid 0fff0000 > $PROCFS |
+	echo wmode $op_work_mode > $PROCFS |
+	echo swctl 1 > $PROCFS
+	#IFACE=${ETHER}${VIDW}
+	#clbr 1
+	ifplugd -u 0 -d 0 -p -q -i ${ETHER}${VIDW}
+}
+
+wi_mode () {
+	#Forwarding mode
+	forward_mode
+	
+	config_set wl_bss_role2 0
+
+	# Bridge
+	brctl addbr $BR |
+	brctl addbr $BR1 -NO_FLOOD_MC -FLOOD_UNKNOW_UC
+	#brctl addbr $BR1
+
+	# Vlan iinterface
+	vconfig add eth0 ${VIDL} |
+	vconfig add eth0 ${VIDW}
+
+	# Add ether iface in br0
+	brctl addif $BR ${ETHER}${VIDL}
+
+	# Add ether iface in br1
+	brctl addif $BR1 ${ETHER}${VIDW}
+	#brctl addif $BR1 ${ETHER}${VIDW} -NO_FLOOD_MC -FLOOD_UNKNOW_UC
+
+	# Bring up eth interface to do calibration
+	ifconfig ${ETHER}${VIDL} up |
+	ifconfig ${ETHER}${VIDW} up |
+	ifconfig eth0 up |
+	ifconfig $BR up |
+	ifconfig $BR1 up
+
+	# Config mac address
+	cfg_lan_mac
+
+	# Config mac address
+	ifconfig $BR1 hw ether $STAMAC |
+	ifconfig ${ETHER}${VIDW} hw ether $STAMAC
+
+	# Config wifi
+	# reference to chechup script
+
+	# Generate working file
+	cat > "$FILE" <<EOF
+	LAN=$BR
+	WAN=
+	HOSTAPD=1
+	WPASUP=1
+	STA=$STA
+	AP=$AP
+	BRAP=$BR
+	BRSTA=$BR1
+	IFPLUGD=$STA
+	MODE=`get_wanmode`
+	OP=$op_work_mode
+	LMAC=$LMAC
+	WMAC=$WMAC
+	STAMAC=$STAMAC
+EOF
+	echo sclk > $PROCFS |
+	echo 8021q 0000810c > $PROCFS |
+	echo 8021q 0fff000e > $PROCFS |
+	echo epvid 0fff0100 > $PROCFS |
+	echo epvid 0fff0200 > $PROCFS |
+	echo bssid 0fff0000 > $PROCFS |
+	echo bssid 00000100 > $PROCFS |
+	echo wmode $op_work_mode > $PROCFS |
+	echo swctl 1 > $PROCFS
+	#IFACE=${ETHER}${VIDL}
+	#clbr 1
+	ifplugd -u 0 -d 0 -p -q -i ${ETHER}${VIDL}
+}
+
+br_mode () {
+	#SW forwarding mode
+	config_set wl_forward_mode 1
+
+	config_set wl_bss_role2 256
+
+	# bridge
+	brctl addbr $BR -FLOOD_UNKNOW_UC
+
+	# ethernet
+	vconfig add eth0 ${VIDL}
+
+	# Add ether iface in br0
+	brctl addif $BR ${ETHER}${VIDL}
+
+	# Bring up eth interface to do calibration
+	ifconfig ${ETHER}${VIDL} up |
+	ifconfig eth0 up |
+	ifconfig $BR up
+
+	# Config mac address
+	cfg_lan_mac
+
+	# Config wifi
+	# reference to chechup script
+
+	# Config AP unit same as STA
+	cfg_id $AP 1
+	cfg_id $STA 1
+
+	# Generate working file
+	cat > "$FILE" <<EOF
+	LAN=$BR
+	WAN=$BR
+	HOSTAPD=1
+	WPASUP=1
+	STA=$STA
+	AP=$AP
+	BRAP=$BR
+	BRSTA=$BR
+	IFPLUGD=$STA
+	MODE=`get_wanmode`
+	OP=$op_work_mode
+	LMAC=$LMAC
+	WMAC=$WMAC
+	STAMAC=$STAMAC
+EOF
+	echo sclk > $PROCFS |
+	echo 8021q 0fff000e > $PROCFS |
+	echo epvid 0fff0100 > $PROCFS |
+	echo epvid 0fff0200 > $PROCFS |
+	echo bssid 0fff0000 > $PROCFS |
+	echo wmode $op_work_mode > $PROCFS |
+	echo swctl 1 > $PROCFS
+	#IFACE=${ETHER}${VIDL}
+	#clbr 1
+	ifplugd -u 0 -d 0 -p -q -i ${ETHER}${VIDL}
+}
+
+smart_mode () {
+	config_get wan_mode wan_mode
+	case $wan_mode in
+		[23]) wr_mode;;
+		9) ap_mode;;
+	esac
+}
+
+mb_mode () {
+	ap_mode
+}
+
+p2p_mode () {
+	# Bridge
+	brctl addbr $BR |
+	brctl addbr $BR1 -NO_FLOOD_MC -FLOOD_UNKNOW_UC
+
+	# Vlan iinterface
+	vconfig add eth0 ${VIDL} |
+	vconfig add eth0 ${VIDW}
+
+	# Add ether iface in br0
+	brctl addif $BR ${ETHER}${VIDL}
+
+	# Add ether iface in br1
+	brctl addif $BR1 ${ETHER}${VIDW}
+
+	# Bring up eth interface to do calibration
+	ifconfig ${ETHER}${VIDL} up |
+	ifconfig ${ETHER}${VIDW} up |
+	ifconfig eth0 up |
+	ifconfig $BR up |
+	ifconfig $BR1 up
+
+	# Config mac address
+	cfg_lan_mac
+
+	# Config mac address
+	#ifconfig $BR1 hw ether $STAMAC |
+	#ifconfig ${ETHER}${VIDW} hw ether $STAMAC
+	ifconfig $BR1 hw ether $LMAC |
+	ifconfig ${ETHER}${VIDW} hw ether $LMAC
+
+	# Config wifi
+	# reference to chechup script
+
+	# Generate working file
+	cat > "$FILE" <<EOF
+	LAN=$BR
+	WAN=
+	HOSTAPD=
+	WPASUP=1
+	STA=$AP
+	AP=
+	BRAP=$BR
+	BRSTA=$BR1
+	IFPLUGD=$BR1
+	MODE=`get_wanmode`
+	OP=$op_work_mode
+	LMAC=$LMAC
+	WMAC=$WMAC
+	STAMAC=$STAMAC
+EOF
+	echo sclk > $PROCFS |
+	echo 8021q 0000810c > $PROCFS |
+	echo 8021q 0fff000e > $PROCFS |
+	echo epvid 0fff0100 > $PROCFS |
+	echo epvid 0fff0200 > $PROCFS |
+	echo bssid 0fff0000 > $PROCFS |
+	echo bssid 00000100 > $PROCFS |
+	echo wmode $op_work_mode > $PROCFS |
+	echo swctl 1 > $PROCFS
+	#IFACE=${ETHER}${VIDL}
+	#clbr 1
+	ifplugd -u 0 -d 0 -p -q -i ${ETHER}${VIDW}
+}
+
+client_mode () {
+	#Forwarding mode
+	forward_mode
+
+	config_set wl_bss_role2 0
+	BR=""	
+	
+	# Bridge
+	brctl addbr $BR1  -NO_FLOOD_MC -FLOOD_UNKNOW_UC
+
+	# Vlan iinterface
+	vconfig add eth0 ${VIDW}
+
+	# Add ether iface in br0
+	# Add ether iface in br1
+	brctl addif $BR1 ${ETHER}${VIDW}
+	#brctl addif $BR1 ${ETHER}${VIDW} -NO_FLOOD_MC -FLOOD_UNKNOW_UC
+
+	# Bring up eth interface to do calibration
+	ifconfig ${ETHER}${VIDW} up |
+	ifconfig eth0 up |
+	ifconfig $BR1 up
+
+    # Config mac address
+	cfg_lan_mac
+
+	# Config mac address
+	ifconfig eth0 hw ether $LMAC |
+
+	# Config mac address
+	ifconfig $BR1 hw ether $STAMAC |
+	ifconfig ${ETHER}${VIDW} hw ether $STAMAC
+
+	# Config wifi
+	# reference to chechup script
+
+	# Generate working file
+	cat > "$FILE" <<EOF
+	LAN=$BR
+	WAN=
+	HOSTAPD=
+	WPASUP=1
+	STA=$STA
+	AP=
+	BRAP=
+	BRSTA=$BR1
+	IFPLUGD=$STA
+	MODE=`get_wanmode`
+	OP=$op_work_mode
+	LMAC=$LMAC
+	WMAC=$WMAC
+	STAMAC=$STAMAC
+EOF
+	echo sclk > $PROCFS |
+	echo 8021q 0000810c > $PROCFS |
+	echo 8021q 0fff000e > $PROCFS |
+	echo epvid 0fff0100 > $PROCFS |
+	echo epvid 0fff0200 > $PROCFS |
+	echo bssid 0fff0000 > $PROCFS |
+	echo bssid 00000100 > $PROCFS |
+	echo wmode $op_work_mode > $PROCFS |
+	echo swctl 1 > $PROCFS
+	#IFACE=${ETHER}${VIDL}
+	#clbr 1
+	ifplugd -u 0 -d 0 -p -q -i ${ETHER}${VIDL}
+}
+
+smartcfg_mode () {
+	# Bridge
+	brctl addbr $BR
+
+	# Vlan iinterface
+	vconfig add eth0 ${VIDL}
+
+	# Add ether iface in br0
+	brctl addif $BR ${ETHER}${VIDL}
+
+	# Bring up eth interface to do calibration
+	ifconfig ${ETHER}${VIDL} up |
+	ifconfig eth0 up |
+	ifconfig $BR up
+
+	# Config mac address
+	cfg_lan_mac
+
+	echo "config.smart_config=1" > /proc/wla
+
+	cat > "$FILE" <<EOF
+	LAN=
+	WAN=
+	HOSTAPD=
+	WPASUP=
+	STA=$STA
+	AP=
+	BRAP=
+	BRSTA=
+	IFPLUGD=$STA
+	MODE=`get_wanmode`
+	OP=$op_work_mode
+	LMAC=$LMAC
+	WMAC=$WMAC
+	STAMAC=$STAMAC
+EOF
+	echo sclk > $PROCFS |
+	echo 8021q 0fff000e > $PROCFS |
+	echo epvid 0fff0100 > $PROCFS |
+	echo epvid 0fff0200 > $PROCFS |
+	echo bssid 0fff0000 > $PROCFS |
+	echo wmode $op_work_mode > $PROCFS |
+	echo swctl 1 > $PROCFS
+	#IFACE=${ETHER}${VIDL}
+	#clbr 1
+	ifplugd -u 0 -d 0 -p -q -i ${ETHER}${VIDL}
+}
+
+stop () {
+	# detach eth port and led */
+	echo swctl 0 > $PROCFS
+	killall ifplugd
+	killall brgprobe
+	if [ $OPMODE -eq 3 ]; then
+		brctl delif $BR1 ${ETHER}${VIDW}
+		ifconfig $BR1 down
+		brctl delbr $BR1
+	elif [ $OPMODE -eq 4 -o $OPMODE -eq 5 ]; then
+		brctl delif $BR $STA
+	fi
+
+	# br_mode need the special br setting, remove the old one
+	ifconfig $BR down
+	brctl delbr $BR
+
+	echo "workmode stop: kill all ifplugd op($OPMODE)"
+}
+
+start () {
+	config_get op_work_mode op_work_mode
+	mac_modified
+	config_get smrt_enable smrt_enable
+	[ $smrt_enable = 1 ] && op_work_mode=99
+	case $op_work_mode in
+		0) db_mode
+		   echo mdio 0 0 3100 > $PROCFS
+		   if [ -x ${probe_prog} ]; then
+				start-stop-daemon -S -x ${probe_prog} -b 2>/dev/null
+		   fi;;
+		1) ap_mode;;
+		2) wr_mode;;
+		3) wi_mode;;
+		4|5) br_mode;;
+		6) smart_mode;;
+		7) mb_mode;;
+		8) p2p_mode;;
+		9) client_mode;;
+		99) smartcfg_mode;;
+	esac
+	echo "workmode start: attach ifplugd op($op_work_mode)"
+}
+
+restart () {
+	stop
+	start
+}

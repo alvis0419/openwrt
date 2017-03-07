@@ -1,0 +1,390 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2013 Montage Inc.
+
+. /etc/cdb.sh
+. /etc/if.sh
+
+config_get op_work_mode op_work_mode
+if [ ${op_work_mode} = 9 ]; then
+    exit 0
+fi
+
+config_get igmp_proxy_enable igmp_proxy_enable
+config_get sys_remote_enable sys_remote_enable
+config_get nat_enable nat_enable
+config_get nat_dmz_enable nat_dmz_enable
+config_get sys_funcmode sys_funcmode
+config_get op_work_mode op_work_mode
+
+if [ -f "/lib/wdk/nf" ] ; then
+	. /lib/wdk/nf
+else
+	echo "ERROR: Script Lost"
+fi
+if [ $IPTABLES_MODE = 1 ]; then
+	IPTABLES_PREPARE=do_iptables_prepare
+	IPTABLES_BIN=do_iptables_rule
+	IPTABLES_COMMIT=do_iptables_commit
+	IPTABLES_DELETE=nat_clear_all_new
+else
+	IPTABLES_BIN=do_iptables
+	IPTABLES_DELETE=nat_clear_all
+fi
+
+CONNTRACK_BIN=conntrack
+
+nat_clear_all_new () {
+	do_iptables_delete mangle
+	do_iptables_delete nat
+	$CONNTRACK_BIN -F
+	$CONNTRACK_BIN -D
+}
+
+clear_remote_mangement () {
+	$IPTABLES_BIN -t mangle -F REMOTEMGT
+	$IPTABLES_BIN -t mangle -D PREROUTING -j REMOTEMGT
+	$IPTABLES_BIN -t mangle -X REMOTEMGT
+}
+
+clear_tcpmss () {
+	$IPTABLES_BIN -t mangle -F CLAMP
+	$IPTABLES_BIN -t mangle -D FORWARD -j CLAMP
+	$IPTABLES_BIN -t mangle -X CLAMP
+}
+
+clear_pre_rule () {
+	$IPTABLES_BIN -t mangle -F PRE_RULE
+	$IPTABLES_BIN -t mangle -D PREROUTING -j PRE_RULE
+	$IPTABLES_BIN -t mangle -X PRE_RULE
+}
+
+clear_nat () {
+	$IPTABLES_BIN -t nat -F PREROUTE_RULE
+	$IPTABLES_BIN -t nat -D PREROUTING -j PREROUTE_RULE
+	$IPTABLES_BIN -t nat -X PREROUTE_RULE
+	$IPTABLES_BIN -t nat -F POSTROUTE_RULE
+	$IPTABLES_BIN -t nat -D POSTROUTING -j POSTROUTE_RULE
+	$IPTABLES_BIN -t nat -X POSTROUTE_RULE
+}
+
+nat_clear_all () {
+	clear_remote_mangement
+	clear_pre_rule
+	clear_tcpmss
+	clear_nat
+	$CONNTRACK_BIN -F
+	$CONNTRACK_BIN -D
+}
+
+get_ifconfig_parm () {
+	local interface parm
+	interface="$1"; parm="$2"; shift 2
+
+	for s in `ifconfig $interface`; do
+		case $s in
+			$parm:*) echo "${s#*:}"; return;;
+			*);;
+		esac
+	done
+}
+
+nat_add_port_mapping () {
+	local err; err=0
+	local wanip
+	wanip=`get_ifconfig_parm $WANIF addr`
+	for line in `seq 1 10`
+		do
+			line=nat_port_map$line
+			config_get line $line
+			[ "$line" == "!ERR" -o "$line" == "" ] && break
+			line=`echo $line | sed -e 's/&/;/g'`
+			eval $line
+			if [ "$en" = "1" ]; then
+				gp=`echo $gp | sed -e 's/-/:/g'`
+				if [ "$gprot" = "tcp/udp" ]; then
+					[ -n "$wanip" ] && $IPTABLES_BIN -t nat -A PREROUTE_RULE -p tcp -d $wanip -m multiport --dport $gp -j DNAT --to $lip || err=1
+					[ -n "$wanip" ] && $IPTABLES_BIN -t nat -A PREROUTE_RULE -p udp -d $wanip -m multiport --dport $gp -j DNAT --to $lip || err=1
+				else
+					[ -n "$wanip" ] && $IPTABLES_BIN -t nat -A PREROUTE_RULE -p $gprot -d $wanip -m multiport --dport $gp -j DNAT --to $lip || err=1
+				fi
+			fi
+		done
+	return $err
+}
+
+nat_add_virtual_server() {
+	local err; err=0
+	local wanip
+	local lannet
+	config_get lan_ip lan_ip
+	lannet=`echo $lan_ip | awk -F"." '{ printf $1"."$2"."$3".0" }'`
+	wanip=`get_ifconfig_parm $WANIF addr`
+	for line in `seq 1 20`
+		do
+			line=nat_vserver$line
+			config_get line $line
+			[ "$line" == "!ERR" -o "$line" == "" ] && break
+			line=`echo $line | sed -e 's/&/;/g'`
+			eval $line
+			if [ "$en" = "1" ]; then
+				if [ "$gprot" = "tcp/udp" ]; then
+					[ -n "$wanip" ] && $IPTABLES_BIN -t nat -A PREROUTE_RULE -p tcp -d $wanip --dport $gp -j DNAT --to $lip:$lp || err=1
+					[ -n "$wanip" ] && $IPTABLES_BIN -t nat -A PREROUTE_RULE -p udp -d $wanip --dport $gp -j DNAT --to $lip:$lp || err=1
+					# for NAT-Loopback
+					$IPTABLES_BIN -t nat -A POSTROUTE_RULE -p tcp -d $lip -s $lip/24 --dport $lp -j SNAT --to $lip || err=1
+					$IPTABLES_BIN -t nat -A POSTROUTE_RULE -p udp -d $lip -s $lip/24 --dport $lp -j SNAT --to $lip || err=1
+					# for hairpin
+					$IPTABLES_BIN -t nat -A POSTROUTE_RULE -s ${lannet}/24 -p tcp --dport $gp -d $lip -j MASQUERADE
+					$IPTABLES_BIN -t nat -A POSTROUTE_RULE -s ${lannet}/24 -p udp --dport $gp -d $lip -j MASQUERADE
+				else
+					[ -n "$wanip" ] && $IPTABLES_BIN -t nat -A PREROUTE_RULE -p $gprot -d $wanip --dport $gp -j DNAT --to $lip:$lp || err=1
+					$IPTABLES_BIN -t nat -A POSTROUTE_RULE -s ${lannet}/24 -p $gprot --dport $gp -d $lip -j MASQUERADE
+				fi
+			fi
+		done
+	return $err
+}
+
+nat_add_triggerport () {
+	for line in `seq 1 10`
+		do
+			line=nat_port_trig$line
+			config_get line $line
+			[ "$line" == "!ERR" -o "$line" == "" ] && break
+			line=`echo $line | sed -e 's/&/;/g'`
+			eval $line
+			if [ "$en" = "1" ]; then
+				gp=`echo $gp | sed -e 's/-/:/g'`
+				rp=`echo $rp | sed -e 's/-/:/g'`
+				trigstr="--type out --trprot $rprot --trport $rp  --reprot $gprot  --report $gp"
+				if [ "$rprot" = "tcp/udp" ]; then
+					$IPTABLES_BIN -t nat -I POSTROUTE_RULE -o $WANIF -p tcp --dport $rp -j TRIGGER $trigstr || err=1
+					$IPTABLES_BIN -t nat -I POSTROUTE_RULE -o $WANIF -p udp --dport $rp -j TRIGGER $trigstr || err=1
+				else
+					$IPTABLES_BIN -t nat -I POSTROUTE_RULE -o $WANIF -p $rprot --dport $rp -j TRIGGER $trigstr || err=1
+				fi
+				if [ "$gprot" = "tcp/udp" ]; then
+					$IPTABLES_BIN -t nat -I PREROUTE_RULE -i $WANIF -p tcp --dport $gp -j TRIGGER --type dnat || err=1
+					$IPTABLES_BIN -t nat -I PREROUTE_RULE -i $WANIF -p udp --dport $gp -j TRIGGER --type dnat || err=1
+				else
+					$IPTABLES_BIN -t nat -I PREROUTE_RULE -i $WANIF -p $gprot --dport $gp -j TRIGGER --type dnat || err=1
+				fi
+			fi
+		done
+	return $err
+}
+
+nat_dmz () {
+	local err; err=0
+	local wanip
+	wanip=`get_ifconfig_parm $WANIF addr`
+	for line in `seq 1 10`
+		do
+			line=nat_dmz_host$line
+			config_get line $line
+			[ "$line" == "!ERR" -o "$line" == "" ] && break
+			line=`echo $line | sed -e 's/&/;/g'`
+			eval $line
+			if [ "$en" = "1" ]; then
+				if [ "$gip" = "" ]; then
+					[ -n "$wanip" ] && $IPTABLES_BIN -t nat -A PREROUTE_RULE -i $WANIF -p tcp -d $wanip -j DNAT --to $lip || err=1
+					[ -n "$wanip" ] && $IPTABLES_BIN -t nat -A PREROUTE_RULE -i $WANIF -p udp -d $wanip -j DNAT --to $lip || err=1
+				else
+					$IPTABLES_BIN -t nat -A PREROUTE_RULE -i $WANIF -p tcp -d $gip -j DNAT --to $lip || err=1
+					$IPTABLES_BIN -t nat -A PREROUTE_RULE -i $WANIF -p udp -d $gip -j DNAT --to $lip || err=1
+				fi
+			fi
+		done
+	return $err
+}
+
+remote_setup () {
+	$IPTABLES_BIN -t mangle -N REMOTEMGT
+	$IPTABLES_BIN -t mangle -I PREROUTING -j REMOTEMGT
+}
+
+nat_remote_redirect () {
+	remote_setup
+	local wanip
+	config_get lan_ip lan_ip
+	#config_get sys_remote_ip sys_remote_ip
+	#config_get sys_remote_port sys_remote_port
+	#config_get wan_alias wan_alias
+	wanip=`get_ifconfig_parm $WANIF addr`
+	[ -n "$wanip" ] && $IPTABLES_BIN -t nat -A PREROUTE_RULE -p tcp -d $wanip --dport 80  -j DNAT --to $lan_ip:80 || err=1
+	[ -n "$wanip" ] && $IPTABLES_BIN -t nat -A PREROUTE_RULE -p tcp -d $wanip --dport 443  -j DNAT --to $lan_ip:443 || err=1
+	#if [ "$sys_remote_ip" != "" -a "$sys_remote_ip" != "0.0.0.0" ]; then
+	#	[ -n "$wanip" ] && $IPTABLES_BIN -t nat -A PREROUTE_RULE -p tcp -s $sys_remote_ip -d $wanip --dport $sys_remote_port  -j DNAT --to $lan_ip:80 || err=1
+	#	[ -n "$wanip" ] && $IPTABLES_BIN -t nat -A PREROUTE_RULE -p tcp -s $sys_remote_ip -d $wanip --dport $sys_remote_port  -j DNAT --to $lan_ip:443 || err=1
+	#else
+	#	[ -n "$wanip" ] && $IPTABLES_BIN -t nat -A PREROUTE_RULE -p tcp -d $wanip --dport $sys_remote_port  -j DNAT --to $lan_ip:80 || err=1
+	#	[ -n "$wanip" ] && $IPTABLES_BIN -t nat -A PREROUTE_RULE -p tcp -d $wanip --dport $sys_remote_port  -j DNAT --to $lan_ip:443 || err=1
+	#fi
+
+	#if [ "$wan_alias" = "1" ]; then
+	#	local line
+	#	for aliasip in `seq 1 5`
+	#		do
+	#			aliasip=wan_alias_ip$aliasip
+	#			config_get aliasip aliasip
+	#			[ "$aliasip" == "!ERR" -o "$aliasip" == "" ] && break
+	#			if [ "$sys_remote_ip" != "" -a "$sys_remote_ip" != "0.0.0.0" ]; then
+	#				$IPTABLES_BIN -t nat -A PREROUTE_RULE -p tcp -s $sys_remote_ip -d $aliasip --dport $sys_remote_port  -j DNAT --to $lan_ip:80 || err=1
+	#				$IPTABLES_BIN -t nat -A PREROUTE_RULE -p tcp -s $sys_remote_ip -d $aliasip --dport $sys_remote_port  -j DNAT --to $lan_ip:443 || err=1
+	#			else
+	#				$IPTABLES_BIN -t nat -A PREROUTE_RULE -p tcp -d $aliasip --dport $sys_remote_port  -j DNAT --to $lan_ip:80 || err=1
+	#				$IPTABLES_BIN -t nat -A PREROUTE_RULE -p tcp -d $aliasip --dport $sys_remote_port  -j DNAT --to $lan_ip:443 || err=1
+	#			fi
+	#		done
+	#fi
+}
+
+nat_masquerade () {
+	$IPTABLES_BIN -t nat -A POSTROUTE_RULE -o $WANIF -j MASQUERADE
+}
+
+non_standard_ftp () {
+	config_get nat_alg_ftp_port nat_alg_ftp_port
+	echo "$nat_alg_ftp_port" > /proc/non_standard_ftp
+}
+
+nat_pptp_alg () {
+	config_get nat_alg_pptp nat_alg_pptp
+	if [ "$nat_alg_pptp" = "1" ]; then
+		echo 1 > /proc/pptp_alg
+	elif [ "$nat_alg_pptp" = "0" ]; then
+		echo 0 > /proc/pptp_alg
+	fi
+}
+
+nat_rtsp_alg () {
+	config_get nat_alg_rtsp nat_alg_rtsp
+	if [ "$nat_alg_rtsp" = "1" ]; then
+		echo 1 > /proc/rtsp_alg
+	elif [ "$nat_alg_rtsp" = "0" ]; then
+		echo 0 > /proc/rtsp_alg
+	fi
+}
+
+nat_h323_alg () {
+	config_get nat_alg_netmeeting nat_alg_netmeeting
+	if [ "$nat_alg_netmeeting" = "1" ]; then
+		echo 1 > /proc/h323_alg
+	elif [ "$nat_alg_netmeeting" = "0" ]; then
+		echo 0 > /proc/h323_alg
+	fi
+}
+
+nat_sip_alg () {
+	config_get nat_alg_sip nat_alg_sip
+	if [ "$nat_alg_sip" = "1" ]; then
+		echo 1 > /proc/sip_alg
+	elif [ "$nat_alg_sip" = "0" ]; then
+		echo 0 > /proc/sip_alg
+	fi
+}
+
+nat_msn_alg () {
+	config_get nat_alg_msn nat_alg_msn
+	if [ "$nat_alg_msn" = "1" ]; then
+		echo 1 > /proc/msn_alg
+	elif [ "$nat_alg_msn" = "0" ]; then
+		echo 0 > /proc/msn_alg
+	fi
+}
+
+nat_ipsec_alg () {
+	config_get nat_alg_ipsec nat_alg_ipsec
+	if [ "$nat_alg_ipsec" = "1" ]; then
+		$IPTABLES_BIN -t nat -A PREROUTE_RULE -i $LANIF -p 50 -m esp --type out
+		$IPTABLES_BIN -t nat -A PREROUTE_RULE -i $WANIF -p 50 -m esp --type dnat
+	fi
+}
+
+nat_tcp_mss_clamp () {
+	$IPTABLES_BIN -t mangle -N CLAMP
+	$IPTABLES_BIN -t mangle -A FORWARD -j CLAMP
+	$IPTABLES_BIN -t mangle -A CLAMP -p tcp -m tcp --tcp-flags SYN,RST SYN -m tcpmss --mss 1400:1536 -j TCPMSS --clamp-mss-to-pmtu
+}
+
+
+mangle_pre_setup () {
+	$IPTABLES_BIN -t mangle -N PRE_RULE
+	$IPTABLES_BIN -t mangle -A PREROUTING -j PRE_RULE
+}
+
+nat_setup () {
+	$IPTABLES_BIN -t nat -N PREROUTE_RULE
+	$IPTABLES_BIN -t nat -A PREROUTING -j PREROUTE_RULE
+	$IPTABLES_BIN -t nat -N POSTROUTE_RULE
+	$IPTABLES_BIN -t nat -A POSTROUTING -j POSTROUTE_RULE
+}
+
+nat_hnat () {
+	local wanip
+	config_get lan_ip lan_ip
+	config_get wan_mode wan_mode
+	config_get nat_acmode nat_acmode
+
+	wanip=`get_ifconfig_parm $WANIF addr`
+	[ -n "$wanip" ] && {
+		echo wan_mode=$wan_mode > /proc/hnat
+		echo wan_ip=$wanip > /proc/hnat
+		echo lan_ip=$lan_ip > /proc/hnat
+		case $nat_acmode in
+			0|1) echo hnat_mode=$nat_acmode > /proc/hnat;;
+		esac
+	}
+}
+
+start () {
+	[ "$sys_funcmode" == "1" ] && exit 0
+	local wanip
+	wanip=`get_ifconfig_parm $WANIF addr`
+
+	$IPTABLES_PREPARE
+	nat_setup
+	mangle_pre_setup
+	# for cdrouter_firewall_1, Inbound TCP connections to public side HTTP port are blocked
+	# for cdrouter_firewall_2, Inbound TCP connections to LAN hosts are blocked
+	#if [ "$igmp_proxy_enable" == "0" ] ; then
+	#	[ -n "$wanip" ] && $IPTABLES_BIN -t mangle -A PRE_RULE -i $WANIF -d $wanip -j ACCEPT
+	#	[ -n "$wanip" ] && $IPTABLES_BIN -t mangle -A PRE_RULE -i $WANIF ! -d $wanip -j DROP
+	#else
+	#	$IPTABLES_BIN -t mangle -F PRE_RULE
+	#fi
+	#[ "$sys_remote_enable" = "1" ] && nat_remote_redirect
+	#[ "$op_work_mode" = 3 -o "$op_work_mode" = 9 ] && nat_remote_redirect
+
+	[ -f $FILE ] && {
+		. $FILE
+		${remote}
+	}
+
+	if [ "$nat_enable" = "1" ] ; then
+		nat_masquerade || err=1
+		nat_add_port_mapping || err=1
+		nat_add_virtual_server || err=1
+		nat_add_triggerport || err=1
+		nat_pptp_alg
+		nat_rtsp_alg
+		nat_h323_alg
+		nat_sip_alg
+		nat_msn_alg
+		[ "$op_work_mode" = "9" ] || nat_ipsec_alg
+		nat_tcp_mss_clamp
+		non_standard_ftp
+		nat_hnat
+		[ "$nat_dmz_enable" = "1" ] && nat_dmz || err=1
+	fi
+	$IPTABLES_COMMIT
+}
+
+stop () {
+	$IPTABLES_DELETE
+	echo reset > /proc/hnat
+}
+
+# main
+
+return $err

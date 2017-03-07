@@ -1,0 +1,32 @@
+#module_name:priority:boot:start_action:stop_action:dependence
+#
+# module name, please reference /etc/config/cdb.define
+# if dependence is changed, action_script of module will be executed by priority
+# boot: start_action will be executed when boot
+#
+
+log   :10:1:/lib/wdk/logconf::
+op    :10:1:/etc/init.d/workmode start:/etc/init.d/workmode stop:
+vlan  :40:1:/etc/init.d/vlan start:/etc/init.d/vlan stop:
+lan   :41:1:/etc/init.d/lan start:/etc/init.d/lan stop:op
+lan6  :41:1:/etc/init.d/radvd start:/etc/init.d/radvd stop:op
+wl    :42:1:/etc/init.d/wlan start:/etc/init.d/wlan stop:op
+wan   :43:1:/etc/init.d/wan start:/etc/init.d/wan stop:op|poe|pptp|l2tp|dns|vlan
+fw    :45:1:/etc/init.d/fw start:/etc/init.d/fw stop:wan
+nat   :46:1:/etc/init.d/nat start:/etc/init.d/nat stop:wan|vlan|igmp
+route :49:1:/lib/wdk/route::lan|wan
+ddns  :50:1:/etc/init.d/ddns start:/etc/init.d/ddns stop:wan
+dlna  :50:1:/etc/init.d/dlna start:/etc/init.d/dlna stop:
+http  :50:1:/etc/init.d/uhttpd start:/etc/init.d/uhttpd stop:op|lan
+dns   :60:1:/lib/wdk/dhcps::lan|dhcps
+smb   :62:1:/lib/wdk/smb run::
+ftp   :63:1:/etc/init.d/stupid-ftpd start:/etc/init.d/stupid-ftpd stop:
+prn   :63:1:/lib/wdk/prn run::
+qos   :70:1:/etc/init.d/qos start:/etc/init.d/qos stop:wan|vlan
+sys   :75:1:/lib/wdk/system; /lib/wdk/mangment::
+antibb:80:1:/etc/init.d/bstorm start:/etc/init.d/bstorm stop:vlan
+igmp  :81:1:/etc/init.d/igmpproxy start:/etc/init.d/igmpproxy stop:wan|vlan
+lld2  :90:1:/etc/init.d/lld2 start:/etc/init.d/lld2 stop:lan
+upnp  :95:1:/etc/init.d/upnpd start:/etc/init.d/upnpd stop:wan
+ra    :96:1:/etc/init.d/mpd start;/etc/init.d/shairport start:/etc/init.d/mpd stop;/etc/init.d/shairport stop:op lan
+omicfg:97:1:/lib/wdk/omnicfg reload:/lib/wdk/omnicfg stop:omicfg

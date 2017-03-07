@@ -1,0 +1,41 @@
+#!/bin/sh
+
+mv /dev/random /dev/random.orig
+ln -s /dev/urandom /dev/random
+
+cat > "/hostapd.conf" <<EOF
+interface=wlan0
+driver=nl80211
+hw_mode=g
+channel=1
+ssid=panther_QA
+bssid=00:34:56:78:66:60
+key_mgmt=NONE
+wep_key0="1234567890123"
+country_code=CN
+ieee80211d=1
+ieee80211n=1
+wmm_enabled=1
+wmm_ac_bk_cwmin=4
+wmm_ac_bk_cwmax=10
+wmm_ac_bk_aifs=7
+wmm_ac_bk_txop_limit=0
+wmm_ac_bk_acm=0
+wmm_ac_be_aifs=3
+wmm_ac_be_cwmin=4
+wmm_ac_be_cwmax=10
+wmm_ac_be_txop_limit=0
+wmm_ac_be_acm=0
+wmm_ac_vi_aifs=2
+wmm_ac_vi_cwmin=3
+wmm_ac_vi_cwmax=4
+wmm_ac_vi_txop_limit=94
+wmm_ac_vi_acm=0
+wmm_ac_vo_aifs=2
+wmm_ac_vo_cwmin=2
+wmm_ac_vo_cwmax=3
+wmm_ac_vo_txop_limit=47
+wmm_ac_vo_acm=0
+EOF
+
+start-stop-daemon -S -x /usr/sbin/hostapd -- -B -P /var/run/hostapd.pid /hostapd.conf

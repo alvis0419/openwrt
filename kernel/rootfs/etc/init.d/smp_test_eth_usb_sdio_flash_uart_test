@@ -1,0 +1,43 @@
+#!/bin/sh
+# Copyright (C) 2017 Montage Inc.
+# SMP Test
+
+# mount SD card
+if [ ! -d "/mnt1" ]
+then
+	mkdir /mnt1
+	mount /dev/mmcblk0 /mnt1
+fi
+
+# mount USB device
+if [ ! -d "/mnt2" ]
+then
+	mkdir /mnt2
+	mount /dev/sda /mnt2
+fi
+	
+# SDIO test
+dd if=/dev/zero of=/mnt1/1 bs=128k count=64 &
+dd if=/dev/zero of=/mnt1/2 bs=128k count=64 &
+dd if=/dev/zero of=/mnt1/3 bs=128k count=64 &
+dd if=/dev/zero of=/mnt1/4 bs=128k count=64 &
+dd if=/dev/zero of=/mnt1/5 bs=128k count=64 &
+dd if=/dev/zero of=/mnt1/6 bs=128k count=64 &
+dd if=/dev/zero of=/mnt1/7 bs=128k count=64 &
+dd if=/dev/zero of=/mnt1/8 bs=128k count=64 &
+
+# USB test
+dd if=/dev/zero of=/mnt2/1 bs=128k count=64 &
+dd if=/dev/zero of=/mnt2/2 bs=128k count=64 &
+dd if=/dev/zero of=/mnt2/3 bs=128k count=64 &
+dd if=/dev/zero of=/mnt2/4 bs=128k count=64 &
+dd if=/dev/zero of=/mnt2/5 bs=128k count=64 &
+dd if=/dev/zero of=/mnt2/6 bs=128k count=64 &
+dd if=/dev/zero of=/mnt2/7 bs=128k count=64 &
+dd if=/dev/zero of=/mnt2/8 bs=128k count=64 &
+
+# Flash test
+dd if=/dev/zero of=/dev/mtdblock4 bs=128k count=1024 &
+
+# UART test
+# please key-in enter on console manually to make sure that UART is working normally

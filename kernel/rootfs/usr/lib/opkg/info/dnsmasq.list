@@ -1,0 +1,3 @@
+/usr/sbin/dnsmasq
+/etc/init.d/dnsmasq
+/etc/dnsmasq.conf

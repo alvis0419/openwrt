@@ -1,0 +1,14 @@
+#!/bin/sh
+
+cpu=$1
+sys=$2
+
+if [ $# = 0 ]; then
+	cat /proc/soc/clk
+	return
+fi
+
+echo $cpu $sys > /proc/soc/clk
+echo sclk > /proc/eth
+echo an > /proc/eth
+

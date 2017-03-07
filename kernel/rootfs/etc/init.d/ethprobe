@@ -1,0 +1,39 @@
+#!bin/sh /etc/rc.common
+# Copyright (C) 2013 Montage Inc.
+
+. /etc/cdb.sh
+. /etc/if.sh
+
+local wan_prog="/etc/init.d/wan"
+local ret_probe
+
+probe() {
+	local w="eth0.0"
+	local br="br0"
+	local probeif
+
+	[ $WANMODE -eq 9 ] && probeif=$br || probeif=$w
+	echo "ethprobe: wmode($WANMODE) probe($probeif)"
+	smartprobe -I $probeif
+	ret_probe=$?
+}
+
+if [ $OPMODE -eq 6 ]; then
+	config_get usbif_modemtty usbif_modemtty
+
+	if [ $WANMODE -eq 9 ] && [ -z $usbif_modemtty ]; then
+		probe
+		[ $ret_probe -ne 0 ] && {
+			echo "ethprobe: mobile-3g unplug but eth server appear($ret_probe)"
+			${wan_prog} start
+		}
+	elif [ $WANMODE -ne 9 ]; then
+		probe
+		if [ $ret_probe -eq 0 ]; then
+			echo "ethprobe: non mobile-3g but eth server disappear($ret_probe)"
+			${wan_prog} start
+		elif [ $ret_probe -ne $WANMODE ]; then
+			${wan_prog} restart
+		fi
+	fi
+fi

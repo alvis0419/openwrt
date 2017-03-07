@@ -1,0 +1,12 @@
+#!/bin/sh
+# SDIO
+mkdir /mnt1
+mknod /dev/mmcblk0 b 179 0
+mknod /dev/mmcblk0p1 b 179 1
+mount /dev/mmcblk0p1 /mnt1
+mount /dev/mmcblk0 /mnt1
+
+# USB
+mknod /dev/sda1 b 8 1
+mount /dev/sda1 /mnt
+

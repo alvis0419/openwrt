@@ -1,0 +1,60 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006 OpenWrt.org
+# OpenWrt.BOOT
+
+START=10
+STOP=98
+
+start() {
+	[ -f /proc/mounts ] || /sbin/mount_root
+	[ -f /proc/jffs2_bbc ] && echo "S" > /proc/jffs2_bbc
+	[ -f /proc/net/vlan/config ] && vconfig set_name_type DEV_PLUS_VID_NO_PAD
+
+	mkdir -p /var/log
+	mkdir -p /var/lock
+	mkdir -p /var/state
+	mkdir -p /tmp/.uci
+	chmod 0700 /tmp/.uci
+	touch /var/log/wtmp
+	touch /var/log/lastlog
+	touch /tmp/resolv.conf.auto
+	ln -sf /tmp/resolv.conf.auto /tmp/resolv.conf
+	grep -q debugfs /proc/filesystems && mount -t debugfs debugfs /sys/kernel/debug
+	[ "$FAILSAFE" = "true" ] && touch /tmp/.failsafe
+
+
+
+	#killall -q hotplug2
+	#[ -x /sbin/hotplug2 ] && /sbin/hotplug2 --override --persistent \
+	#		--set-worker /lib/hotplug2/worker_fork.so \
+	#		--set-rules-file /etc/hotplug2.rules \
+	#		--max-children 1 >/dev/null 2>&1 &
+
+	# the coldplugging of network interfaces needs to happen later, so we do it manually here
+	#for iface in $(awk -F: '/:/ {print $1}' /proc/net/dev); do
+	#	/usr/bin/env -i ACTION=add INTERFACE="$iface" /sbin/hotplug-call net
+	#done
+
+	#config_get klogconloglevel "$cfg" klogconloglevel
+	#[ -x /sbin/klogd ] && klogd ${klogconloglevel:+-c $klogconloglevel}
+	[ -x /sbin/klogd ] && klogd -c 1
+
+	[ -f /lib/wdk/system ] && /lib/wdk/system hostname
+
+	# create /dev/root if it doesn't exist
+	[ -e /dev/root ] || {
+		rootdev=$(awk 'BEGIN { RS=" "; FS="="; } $1 == "root" { print $2 }' < /proc/cmdline)
+		[ -n "$rootdev" ] && ln -s "$rootdev" /dev/root
+	}
+
+	load_modules /etc/modules.d/*
+
+	# bring up software reset daemon
+	[ -f /usr/sbin/reset_btn ] && {
+		killall reset_btn
+		/usr/sbin/reset_btn
+	}
+
+}
+
+

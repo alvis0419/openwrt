@@ -1,0 +1,37 @@
+#!/bin/sh
+
+ssid=$1
+bssid_last_byte=$2
+
+mv /dev/random /dev/random.orig
+ln -s /dev/urandom /dev/random
+
+cat > "/hostapd.conf" <<EOF
+interface=wlan0
+driver=nl80211
+hw_mode=g
+channel=1
+ssid=${ssid:=panther_test}
+bssid=00:34:56:78:66:${bssid_last_byte:=66}
+wpa=2
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=CCMP
+wpa_passphrase=12345678
+EOF
+
+if [ -z "$3" -o "$3" != "no_dns" ]; then
+cat > "/etc/dnsmasq.conf" <<EOF
+dhcp-range=192.168.0.2,192.168.0.254,8h
+dhcp-leasefile=/tmp/dnsmasq.leases
+pid-file=/tmp/dnsmasq.pid
+interface=wlan0
+EOF
+fi
+
+start-stop-daemon -S -x /usr/sbin/hostapd -- -B -P /var/run/hostapd.pid /hostapd.conf
+if [ -z "$3" -o "$3" != "no_dns" ]; then
+sleep 2
+ifconfig wlan0 192.168.0.1
+sleep 2
+dnsmasq
+fi

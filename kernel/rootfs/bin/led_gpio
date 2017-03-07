@@ -1,0 +1,37 @@
+#!/bin/sh
+CONF="/etc/led_gpioconf"
+
+. ${CONF}
+
+num=`cat ${CONF} | sed -e '/^$/d' -e '/#/d' | wc -l`
+num=$(($num-1))
+
+for i in `seq 0 31`
+do
+	eval cheetah_gpio=$`echo cheetah_gpio$i`
+	line=`echo $cheetah_gpio | sed 's/&/;/g'`
+	eval $line
+
+	if [ $cheetah_gpio ]; then
+		if [ $trigger ]; then
+			echo $trigger > /sys/devices/platform/leds-gpio/leds/cheetah_gpio$i/trigger
+			trigger=
+		fi
+		if [ $brightness ]; then
+			echo $brightness > /sys/devices/platform/leds-gpio/leds/cheetah_gpio$i/brightness
+			brightness=
+		fi
+		if [ $delay_on ]; then
+			echo $delay_on > /sys/devices/platform/leds-gpio/leds/cheetah_gpio$i/delay_on
+			delay_on=
+		fi
+		if [ $delay_off ]; then
+			echo $delay_off > /sys/devices/platform/leds-gpio/leds/cheetah_gpio$i/delay_off
+			delay_off=
+		fi
+		num=$(($num-1))
+		if [ $num -lt 0 ]; then
+			break
+		fi
+	fi
+done

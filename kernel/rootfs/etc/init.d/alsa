@@ -1,0 +1,17 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006 OpenWrt.org
+# OpenWrt.BOOT
+
+START=01
+boot() {
+	local conf="/var/lib/alsa/asound.state"
+	[ -d "${conf%/*}" ] || mkdir -p ${conf%/*}
+	[ -x /usr/sbin/alsactl ] && {
+		# for wm8750
+		alsactl init
+		[ -f /PowerOn.wav ] && {
+			start-stop-daemon -S -b -x aplay -- /PowerOn.wav
+		}
+	}
+}
+
