@@ -11,7 +11,7 @@
 #include <asm/page.h>
 #include <asm/sections.h>
 
-extern  void cheetah_serial_outc(unsigned char c);
+extern  void panther_serial_outc(unsigned char c);
 
 void __init prom_meminit(void)
 {
@@ -25,7 +25,7 @@ void __init prom_free_prom_memory(void)
 
 int prom_putchar(char c)
 {
-	cheetah_serial_outc(c);
+	panther_serial_outc(c);
     return 1;
 }
 

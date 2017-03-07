@@ -1,8 +1,7 @@
 /* 
- *  Copyright (c) 2013, 2016	Montage Inc.	All rights reserved. 
+ *  Copyright (c) 2013-2017	Montage Technology Group Limited   All rights reserved
  *  
  *  Serial driver for Panther
- *
  */
 
 /* force to turn on CONFIG_SERIAL_CONSOLE option */
@@ -77,7 +76,7 @@
 #define NR_PORTS 3
 
 #if defined(CONFIG_SERIAL_CONSOLE) || defined(CONFIG_CONSOLE_POLL) || defined(CONFIG_CHEETAH_INTERNAL_DEBUGGER)
-static int cta_console_index;
+static int panther_console_index;
 #endif
 
 #if defined(CONFIG_PANTHER_PDMA)
@@ -94,7 +93,7 @@ struct pdma_ch_descr pdma_uart_tx_descr[NR_PORTS][PDMA_BUF_MAX_NUM] __attribute_
 static int pdma_enabled(int idx)
 {
 #if defined(CONFIG_SERIAL_CONSOLE) || defined(CONFIG_CONSOLE_POLL) || defined(CONFIG_CHEETAH_INTERNAL_DEBUGGER)
-    if(cta_console_index==idx)
+    if(panther_console_index==idx)
         return 0;
 #endif
 
@@ -112,21 +111,17 @@ struct serial_state
 	struct tty_port	tport;
     int baud_base;
     unsigned long port;
-    int irq;
-    int flags;
-    int type;
     int line;
     int xmit_fifo_size;
     int custom_divisor;
-    int count;
-    unsigned short  close_delay;
-    unsigned short  closing_wait; /* time to wait before closing */
     struct async_icount icount;
     struct tasklet_struct uart_irq_tasklet;
     unsigned int uart_control;
-
     int curr_baudrate;
-
+    int         timeout;
+    int         x_char; /* xon/xoff character */
+    unsigned long       last_active;
+    struct circ_buf     xmit;
 #if defined(CONFIG_PANTHER_PDMA)
     struct tasklet_struct pdma_rx_tasklet;
     int pdma_rx_buf_idx;
@@ -134,12 +129,6 @@ struct serial_state
     unsigned char *pdma_rx_buf[PDMA_BUF_MAX_NUM];
     unsigned char *pdma_tx_buf[PDMA_BUF_MAX_NUM];
 #endif
-
-    int         read_status_mask;
-    int         timeout;
-    int         x_char; /* xon/xoff character */
-    unsigned long       last_active;
-    struct circ_buf     xmit;
 };
 
 static struct serial_state rs_table[NR_PORTS];
@@ -205,15 +194,21 @@ static struct tty_driver *serial_driver;
 /* number of characters left in xmit buffer before we ask for more */
 #define WAKEUP_CHARS 256
 
+static void change_speed(struct tty_struct *tty, struct serial_state *info,
+		struct ktermios *old);
+static void rs_wait_until_sent(struct tty_struct *tty, int timeout);
+
 static void uart_enable_rx(int idx)
 {
     urcs_enable(idx, URCS_RXEN);
 }
 
+#if 0
 static void uart_disable_rx(int idx)
 {
     urcs_disable(idx, URCS_RXEN);
 }
+#endif
 
 static void rs_disable_tx_interrupts(int idx) 
 {
@@ -435,16 +430,10 @@ static void rs_enable_tx_interrupts(int idx)
 {
 #if defined(CONFIG_PANTHER_PDMA)
     if (pdma_enabled(idx))
-    {
         tasklet_hi_schedule(&rs_table[idx].uart_irq_tasklet);
-    }
     else
-    {
-        //if (transmit_chars(idx))
         urcs_enable(idx, URCS_TIE);
-    }
 #else
-    //if (transmit_chars(idx))
     urcs_enable(idx, URCS_TIE);
 #endif
 }
@@ -463,32 +452,6 @@ static void rs_enable_rx_interrupts(int idx)
     urcs_enable(idx, URCS_RIE);
 #endif
 }
-
-static void change_speed(struct tty_struct *tty, struct serial_state *info,
-			 struct ktermios *old_termios)
-{
-    int baud;
-
-    if (!tty)
-        return;
-
-    /* Determine divisor based on baud rate */
-    baud = tty_get_baud_rate(tty);
-
-    if (info->curr_baudrate!=baud)
-    {
-        if (baud > 0)
-        {
-            urcs_update_br(info->line, urcs_cal_baud_cnt(baud));
-        }
-
-        info->curr_baudrate = baud;
-    }
-
-    rs_table[info->line].baud_base = baud;
-}
-
-static void rs_wait_until_sent(struct tty_struct *tty, int timeout);
 
 #include <asm/uaccess.h>
 
@@ -528,6 +491,9 @@ static void rs_stop(struct tty_struct *tty)
     struct serial_state *info = (struct serial_state *)tty->driver_data;
     unsigned long flags;
 
+	if (serial_paranoia_check(info, tty->name, "rs_stop"))
+		return;
+
     spin_lock_irqsave(&uart_lock, flags);
 
     rs_disable_tx_interrupts(info->line);
@@ -539,6 +505,9 @@ static void rs_start(struct tty_struct *tty)
 {
     struct serial_state *info = (struct serial_state *)tty->driver_data;
     unsigned long flags;
+
+	if (serial_paranoia_check(info, tty->name, "rs_start"))
+		return;
 
     spin_lock_irqsave(&uart_lock, flags);
     if (info->xmit.head != info->xmit.tail && info->xmit.buf)
@@ -555,16 +524,17 @@ void trigger_kgdb_breakpoint(void);
 #if defined(CONFIG_SERIAL_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
 static int zero_received[NR_PORTS];
 #endif
+
 //#define UART0_RX_TEST
 #if defined(UART0_RX_TEST)
 unsigned char next_ch;
 #endif
+
 static void receive_chars(int idx, struct serial_state *info)
 {
     unsigned char ch, flag;
     volatile unsigned int *p = (unsigned int *) (UR_BASE + (0x100 * idx));
     struct  async_icount *icount;
-    //int rx_loop = 0;
     int ubr;
 
     flag = TTY_NORMAL;
@@ -582,7 +552,7 @@ static void receive_chars(int idx, struct serial_state *info)
         /* XXX: possible future mux switch code here */
 #endif
 
-    if(idx==cta_console_index)
+    if(idx==panther_console_index)
     {
 #if defined(CONFIG_SERIAL_CONSOLE) && defined(CONFIG_MAGIC_SYSRQ)
 
@@ -646,16 +616,17 @@ static void receive_chars(int idx, struct serial_state *info)
         }
 #endif
 
-        tty_insert_flip_char(&rs_table[idx].tport, ch, flag);
-    } while (1); //rx_loop++ < 256) ;
+        tty_insert_flip_char(&info->tport, ch, flag);
+    } while (1);
 
 #if 0
     // if rx some data, push it
     if (rx_loop)
-        tty_flip_buffer_push(&rs_table[idx].tport);
+        tty_flip_buffer_push(&info->tport);
 #endif
 
-    tty_schedule_flip(&rs_table[idx].tport);
+    tty_flip_buffer_push(&info->tport);
+    //tty_schedule_flip(&info->tport);
 
     return;
 }
@@ -710,7 +681,7 @@ static int transmit_chars(int idx)
     return enable_tx_intr;
 }
 
-static irqreturn_t cta_uart_interrupt(int irq, void *data)
+static irqreturn_t panther_uart_interrupt(int irq, void *data)
 {
     int idx = irq - IRQ_UART0;
 
@@ -810,7 +781,7 @@ static void uart_tx_pdma_task(unsigned long idx)
 
 #endif
 
-static void cta_uart_deliver(unsigned long idx)
+static void panther_uart_deliver(unsigned long idx)
 {
     volatile int *p = (unsigned int *) (UR_BASE + (0x100 * idx));
     unsigned int status;
@@ -821,7 +792,7 @@ static void cta_uart_deliver(unsigned long idx)
 
     if (!info->tport.tty)
     {
-        // printk("cheetah_uart_interrupt: ignored\n");
+        // printk("panther_uart_interrupt: ignored\n");
         return ;
     }
 
@@ -835,7 +806,7 @@ static void cta_uart_deliver(unsigned long idx)
     /* TX holding register empty - transmit a byte */
     if (status & URCS_TE)
     {
-        //URREG(URCS) = cta_uart_control|URCS_TE;
+        //URREG(URCS) = panther_uart_control|URCS_TE;
         if (transmit_chars(idx))
             tx_intr_enable = 1;
         info->last_active = jiffies;
@@ -893,34 +864,27 @@ static int startup(struct tty_struct *tty, struct serial_state *info)
     unsigned long device_ids[2];
 #endif
 
-    if (port->flags & ASYNC_INITIALIZED)
-    {
-        return retval;
-    }
+    page = get_zeroed_page(GFP_KERNEL);
+    if (!page)
+        return -ENOMEM;
 
     spin_lock_irqsave(&uart_lock, flags);
-    if ( !info->xmit.buf)
-    {
-        page = get_zeroed_page(GFP_KERNEL);
-        if (!page)
-        {
-            retval= -ENOMEM;
-            goto errout;
-        }
-        info->xmit.buf = (unsigned char *) page;
-    }
 
-#ifdef CHEETAH_UART_DEBUG_OPEN
+	if (port->flags & ASYNC_INITIALIZED) {
+		free_page(page);
+		goto errout;
+	}
+
+	if (info->xmit.buf)
+		free_page(page);
+	else
+		info->xmit.buf = (unsigned char *) page;
+
+#ifdef SERIAL_DEBUG_OPEN
     printk("starting up ttys%d ...", info->line);
 #endif
 
     /* Clear anything in the input buffer */
-    if (serial_isroot())
-    {
-        if (tty)
-            set_bit(TTY_IO_ERROR, &tty->flags);
-        retval = 0;
-    }
 
 #if defined(CONFIG_PANTHER_PDMA)
     if (pdma_enabled(info->line))
@@ -954,9 +918,20 @@ static int startup(struct tty_struct *tty, struct serial_state *info)
     rs_enable_tx_interrupts(info->line);
     rs_enable_rx_interrupts(info->line);
 
-    if (tty)
-        clear_bit(TTY_IO_ERROR, &tty->flags);
+    clear_bit(TTY_IO_ERROR, &tty->flags);
     info->xmit.head = info->xmit.tail = 0;
+
+	/*
+	 * Set up the tty->alt_speed kludge
+	 */
+	if ((port->flags & ASYNC_SPD_MASK) == ASYNC_SPD_HI)
+		tty->alt_speed = 57600;
+	if ((port->flags & ASYNC_SPD_MASK) == ASYNC_SPD_VHI)
+		tty->alt_speed = 115200;
+	if ((port->flags & ASYNC_SPD_MASK) == ASYNC_SPD_SHI)
+		tty->alt_speed = 230400;
+	if ((port->flags & ASYNC_SPD_MASK) == ASYNC_SPD_WARP)
+		tty->alt_speed = 460800;
 
     /*
      * and set the speed of the serial port
@@ -981,12 +956,12 @@ static void shutdown(struct tty_struct *tty, struct serial_state *info)
     unsigned long   flags;
 	struct serial_state *state;
 
-    if (!(info->flags & ASYNC_INITIALIZED))
+    if (!(info->tport.flags & ASYNC_INITIALIZED))
         return;
 
 	state = info;
 
-#ifdef CHEETAH_UART_DEBUG_OPEN
+#ifdef SERIAL_DEBUG_OPEN
     printk("Shutting down serial port %d ....\n", info->line);
 #endif
 
@@ -1015,23 +990,50 @@ static void shutdown(struct tty_struct *tty, struct serial_state *info)
         info->xmit.buf = NULL;
     }
 
-    if (info->tport.tty)
-        set_bit(TTY_IO_ERROR, &info->tport.tty->flags);
+    set_bit(TTY_IO_ERROR, &tty->flags);
 
-    info->flags &= ~ASYNC_INITIALIZED;
+    info->tport.flags &= ~ASYNC_INITIALIZED;
     spin_unlock_irqrestore(&uart_lock, flags);
 }
 
+
+/*
+ * This routine is called to set the UART divisor registers to match
+ * the specified baud rate for a serial port.
+ */
+static void change_speed(struct tty_struct *tty, struct serial_state *info,
+			 struct ktermios *old_termios)
+{
+    int baud;
+
+    if (!tty)
+        return;
+
+    /* Determine divisor based on baud rate */
+    baud = tty_get_baud_rate(tty);
+
+    if (info->curr_baudrate!=baud)
+    {
+        if (baud > 0)
+        {
+            urcs_update_br(info->line, urcs_cal_baud_cnt(baud));
+        }
+
+        info->curr_baudrate = baud;
+    }
+
+    rs_table[info->line].baud_base = baud;
+}
 
 static int rs_put_char(struct tty_struct *tty, unsigned char ch)
 {
     struct serial_state *info;
     unsigned long flags;
 
-    if (!tty)
-        return 0;
-
     info = tty->driver_data;
+
+	if (serial_paranoia_check(info, tty->name, "rs_put_char"))
+		return 0;
 
     if (!info->xmit.buf)
         return 0;
@@ -1056,6 +1058,9 @@ static void rs_flush_chars(struct tty_struct *tty)
     struct serial_state *info = (struct serial_state *)tty->driver_data;
     unsigned long flags;
 
+	if (serial_paranoia_check(info, tty->name, "rs_flush_chars"))
+		return;
+
     spin_lock_irqsave(&uart_lock, flags);
 
     if (info->xmit.head == info->xmit.tail
@@ -1075,13 +1080,11 @@ static void rs_flush_chars(struct tty_struct *tty)
 static int rs_write(struct tty_struct * tty, const unsigned char *buf, int count)
 {
     int c, ret = 0;
-    struct serial_state *info;
+	struct serial_state *info = tty->driver_data;
     unsigned long flags;
 
-    if (!tty)
-        return 0;
-
-    info = tty->driver_data;
+	if (serial_paranoia_check(info, tty->name, "rs_write"))
+		return 0;
 
     if (!info->xmit.buf)
         return 0;
@@ -1123,6 +1126,8 @@ static int rs_write_room(struct tty_struct *tty)
 {
     struct serial_state *info = (struct serial_state *)tty->driver_data;
 
+    if (serial_paranoia_check(info, tty->name, "rs_write_room"))
+		return 0;
     return CIRC_SPACE(info->xmit.head, info->xmit.tail, SERIAL_XMIT_SIZE);
 }
 
@@ -1130,6 +1135,8 @@ static int rs_chars_in_buffer(struct tty_struct *tty)
 {
     struct serial_state *info = (struct serial_state *)tty->driver_data;
 
+	if (serial_paranoia_check(info, tty->name, "rs_chars_in_buffer"))
+		return 0;
     return CIRC_CNT(info->xmit.head, info->xmit.tail, SERIAL_XMIT_SIZE);
 }
 
@@ -1138,6 +1145,8 @@ static void rs_flush_buffer(struct tty_struct *tty)
     struct serial_state *info = (struct serial_state *)tty->driver_data;
     unsigned long flags;
 
+	if (serial_paranoia_check(info, tty->name, "rs_flush_buffer"))
+		return;
     spin_lock_irqsave(&uart_lock, flags);
     info->xmit.head = info->xmit.tail = 0;
     spin_unlock_irqrestore(&uart_lock, flags);
@@ -1153,6 +1162,9 @@ static void rs_send_xchar(struct tty_struct *tty, char ch)
     struct serial_state *info = (struct serial_state *)tty->driver_data;
     unsigned long flags;
 
+	if (serial_paranoia_check(info, tty->name, "rs_send_char"))
+		return;
+
     spin_lock_irqsave(&uart_lock, flags);
 
     info->x_char = ch;
@@ -1164,7 +1176,6 @@ static void rs_send_xchar(struct tty_struct *tty, char ch)
     spin_unlock_irqrestore(&uart_lock, flags);
 }
 
-#if 0
 /*
  * ------------------------------------------------------------
  * rs_throttle()
@@ -1176,38 +1187,46 @@ static void rs_send_xchar(struct tty_struct *tty, char ch)
 static void rs_throttle(struct tty_struct * tty)
 {
     struct serial_state *info = (struct serial_state *)tty->driver_data;
-    unsigned long flags;
-#ifdef CHEETAH_UART_DEBUG_THROTTLE
+    //unsigned long flags;
+#ifdef SERIAL_DEBUG_THROTTLE
     char    buf[64];
 
     printk("throttle %s: %d....\n", tty_name(tty, buf),
            tty->ldisc.chars_in_buffer(tty));
 #endif
 
-    if (I_IXOFF(tty))
-        rs_send_xchar(tty, STOP_CHAR(tty));
+	if (serial_paranoia_check(info, tty->name, "rs_unthrottle"))
+		return;
+
+	if (I_IXOFF(tty)) {
+		if (info->x_char)
+			info->x_char = 0;
+		else
+			rs_send_xchar(tty, START_CHAR(tty));
+	}
 }
 
 static void rs_unthrottle(struct tty_struct * tty)
 {
     struct serial_state *info = (struct serial_state *)tty->driver_data;
-    unsigned long flags;
-#ifdef CHEETAH_UART_DEBUG_THROTTLE
+    //unsigned long flags;
+#ifdef SERIAL_DEBUG_THROTTLE
     char    buf[64];
 
     printk("unthrottle %s: %d....\n", tty_name(tty, buf),
            tty->ldisc.chars_in_buffer(tty));
 #endif
 
-    if (I_IXOFF(tty))
-    {
-        if (info->x_char)
-            info->x_char = 0;
-        else
-            rs_send_xchar(tty, START_CHAR(tty));
-    }
+	if (serial_paranoia_check(info, tty->name, "rs_unthrottle"))
+		return;
+
+	if (I_IXOFF(tty)) {
+		if (info->x_char)
+			info->x_char = 0;
+		else
+			rs_send_xchar(tty, START_CHAR(tty));
+	}
 }
-#endif
 
 /*
  * ------------------------------------------------------------
@@ -1226,7 +1245,6 @@ static int get_serial_info(struct tty_struct *tty, struct serial_state *state,
 	tty_lock(tty);
     tmp.line = tty->index;
     tmp.port = state->port;
-//    tmp.irq = state->irq;
     tmp.flags = state->tport.flags;
     tmp.xmit_fifo_size = state->xmit_fifo_size;
     tmp.baud_base = state->baud_base;
@@ -1311,7 +1329,6 @@ check_and_exit:
     return retval;
 }
 
-#if 0
 /*
  * get_lsr_info - get line status register info
  *
@@ -1327,26 +1344,27 @@ static int get_lsr_info(struct serial_state * info, unsigned int __user *value)
     unsigned char status;
     unsigned int result;
     unsigned long flags;
+    volatile int *p = (unsigned int *) (UR_BASE + (0x100 * info->line));
 
-#if 0
     spin_lock_irqsave(&uart_lock, flags);
-    status = custom.serdatr;
-    mb();
+    status = p[URCS>>2];
     spin_unlock_irqrestore(&uart_lock, flags);
-    result = ((status & SDR_TSRE) ? TIOCSER_TEMT : 0);
-#endif
+    result = ((status & URCS_TE) ? TIOCSER_TEMT : 0);
     if (copy_to_user(value, &result, sizeof(int)))
         return -EFAULT;
     return 0;
 }
-#endif
 
 /*
  * rs_break() --- routine which turns the break handling on or off
  */
 static int rs_break(struct tty_struct *tty, int break_state)
 {
-    unsigned long flags;
+	struct serial_state *info = tty->driver_data;
+	unsigned long flags;
+
+    if (serial_paranoia_check(info, tty->name, "rs_break"))
+        return -EINVAL;
 
     spin_lock_irqsave(&uart_lock, flags);
 #if 0
@@ -1354,19 +1372,48 @@ static int rs_break(struct tty_struct *tty, int break_state)
         custom.adkcon = AC_SETCLR | AC_UARTBRK;
     else
         custom.adkcon = AC_UARTBRK;
-#endif
     mb();
+#endif
     spin_unlock_irqrestore(&uart_lock, flags);
     return 0;
 }
 
+/*
+ * Get counter of input serial line interrupts (DCD,RI,DSR,CTS)
+ * Return: write counters to the user passed counter struct
+ * NB: both 1->0 and 0->1 transitions are counted except for
+ *     RI where only 0->1 is counted.
+ */
+static int rs_get_icount(struct tty_struct *tty,
+				struct serial_icounter_struct *icount)
+{
+	struct serial_state *info = tty->driver_data;
+	struct async_icount cnow;
+	unsigned long flags;
+
+	spin_lock_irqsave(&uart_lock, flags);
+	cnow = info->icount;
+	spin_unlock_irqrestore(&uart_lock, flags);
+	icount->cts = cnow.cts;
+	icount->dsr = cnow.dsr;
+	icount->rng = cnow.rng;
+	icount->dcd = cnow.dcd;
+	icount->rx = cnow.rx;
+	icount->tx = cnow.tx;
+	icount->frame = cnow.frame;
+	icount->overrun = cnow.overrun;
+	icount->parity = cnow.parity;
+	icount->brk = cnow.brk;
+	icount->buf_overrun = cnow.buf_overrun;
+
+	return 0;
+}
 
 static int rs_ioctl(struct tty_struct *tty,
                     unsigned int cmd, unsigned long arg)
 {
     struct serial_state * info = (struct serial_state *)tty->driver_data;
 	struct async_icount cprev, cnow;	/* kernel counter temps */
-    struct serial_icounter_struct icount;
     void __user *argp = (void __user *)arg;
     unsigned long flags;
 	DEFINE_WAIT(wait);
@@ -1390,33 +1437,33 @@ static int rs_ioctl(struct tty_struct *tty,
 			return set_serial_info(tty, info, argp);
 		case TIOCSERCONFIG:
 			return 0;
-#if 0
+
         case TIOCSERGETLSR: /* Get line status register */
             return get_lsr_info(info, argp);
-#endif
+
         case TIOCSERGSTRUCT:
             if (copy_to_user(argp,
                              info, sizeof(struct serial_state)))
                 return -EFAULT;
             return 0;
 
-        /*
-         * Wait for any of the 4 modem inputs (DCD,RI,DSR,CTS) to change
-         * - mask passed in arg for lines of interest
-         *   (use |'ed TIOCM_RNG/DSR/CD/CTS for masking)
-         * Caller should use TIOCGICOUNT to see which one it was
-         */
+		/*
+		 * Wait for any of the 4 modem inputs (DCD,RI,DSR,CTS) to change
+		 * - mask passed in arg for lines of interest
+ 		 *   (use |'ed TIOCM_RNG/DSR/CD/CTS for masking)
+		 * Caller should use TIOCGICOUNT to see which one it was
+		 */
         case TIOCMIWAIT:
-			local_irq_save(flags);
+            spin_lock_irqsave(&uart_lock, flags);
 			/* note the counters on entry */
 			cprev = info->icount;
-			local_irq_restore(flags);
+            spin_unlock_irqrestore(&uart_lock, flags);
 			while (1) {
 				prepare_to_wait(&info->tport.delta_msr_wait,
 						&wait, TASK_INTERRUPTIBLE);
-				local_irq_save(flags);
+				spin_lock_irqsave(&uart_lock, flags);
 				cnow = info->icount; /* atomic copy */
-				local_irq_restore(flags);
+				spin_unlock_irqrestore(&uart_lock, flags);
 				if (cnow.rng == cprev.rng && cnow.dsr == cprev.dsr && 
 				    cnow.dcd == cprev.dcd && cnow.cts == cprev.cts) {
 					ret = -EIO; /* no change => error */
@@ -1439,33 +1486,15 @@ static int rs_ioctl(struct tty_struct *tty,
 			}
 			finish_wait(&info->tport.delta_msr_wait, &wait);
 			return ret;
-    case TIOCGICOUNT:
-        spin_lock_irqsave(&uart_lock, flags);
-        cnow = info->icount;
-        spin_unlock_irqrestore(&uart_lock, flags);
-        icount.cts = cnow.cts;
-        icount.dsr = 0;
-        icount.rng = 0;
-        icount.dcd = 0;
-        icount.rx = cnow.rx;
-        icount.tx = cnow.tx;
-        icount.frame = cnow.frame;
-        icount.overrun = cnow.overrun;
-        icount.parity = cnow.parity;
-        icount.brk = cnow.brk;
-        icount.buf_overrun = cnow.buf_overrun;
 
-        if (copy_to_user(argp, &icount, sizeof(icount)))
-            return -EFAULT;
-        return 0;
-    case TIOCSERGWILD:
-    case TIOCSERSWILD:
-        /* "setserial -W" is called in Debian boot */
-        printk ("TIOCSER?WILD ioctl obsolete, ignored.\n");
-        return 0;
-
-    default:
-        return -ENOIOCTLCMD;
+        case TIOCSERGWILD:
+        case TIOCSERSWILD:
+            /* "setserial -W" is called in Debian boot */
+            printk ("TIOCSER?WILD ioctl obsolete, ignored.\n");
+            return 0;
+    
+        default:
+            return -ENOIOCTLCMD;
     }
     return 0;
 }
@@ -1475,7 +1504,7 @@ static void rs_set_termios(struct tty_struct *tty, struct ktermios *old_termios)
     struct serial_state *info = (struct serial_state *)tty->driver_data;
     unsigned int cflag = tty->termios.c_cflag;
     unsigned long flags;
-    unsigned int cta_uart_control;
+    unsigned int panther_uart_control;
     int uart_idx;
 
     if (!info || (info->line>=NR_PORTS))
@@ -1491,38 +1520,38 @@ static void rs_set_termios(struct tty_struct *tty, struct ktermios *old_termios)
     spin_lock_irqsave(&uart_lock, flags);
 
     uart_idx = info->line;
-    cta_uart_control = rs_table[uart_idx].uart_control;
+    panther_uart_control = rs_table[uart_idx].uart_control;
 
     /* change stop bit setting */
     if (cflag & CSTOPB)
-        cta_uart_control|=URCS_SP2;
+        panther_uart_control|=URCS_SP2;
     else
-        cta_uart_control&=~URCS_SP2;
+        panther_uart_control&=~URCS_SP2;
 
     /* change parity enable/disable setting */
     if (cflag & PARENB)
-        cta_uart_control|=URCS_PE;
+        panther_uart_control|=URCS_PE;
     else
-        cta_uart_control&=~URCS_PE;
+        panther_uart_control&=~URCS_PE;
 
     /* change parity odd/even setting */
     if (cflag & PARODD)
-        cta_uart_control&=~URCS_EVEN;
+        panther_uart_control&=~URCS_EVEN;
     else
-        cta_uart_control|=URCS_EVEN;
+        panther_uart_control|=URCS_EVEN;
 
     /* change baud rate setting */
     if (cflag & CBAUD)
     {
-        cta_uart_control&=((unsigned int)(1<<URCS_BRSHFT)-1);
-        cta_uart_control|=(urcs_cal_baud_cnt(tty_termios_baud_rate(&tty->termios))<<URCS_BRSHFT);
+        panther_uart_control&=((unsigned int)(1<<URCS_BRSHFT)-1);
+        panther_uart_control|=(urcs_cal_baud_cnt(tty_termios_baud_rate(&tty->termios))<<URCS_BRSHFT);
 
         rs_table[uart_idx].baud_base = tty_termios_baud_rate(&tty->termios);
     }
 
-    cta_uart_control |= URCS_RXEN;
-    rs_table[uart_idx].uart_control = cta_uart_control;
-    UARTREG(uart_idx, URCS) = cta_uart_control;
+    panther_uart_control |= URCS_RXEN;
+    rs_table[uart_idx].uart_control = panther_uart_control;
+    UARTREG(uart_idx, URCS) = panther_uart_control;
 
     if ((old_termios->c_cflag & CRTSCTS) &&
         !(tty->termios.c_cflag & CRTSCTS))
@@ -1565,6 +1594,7 @@ static void rs_close(struct tty_struct *tty, struct file * filp)
 {
 	struct serial_state *state = tty->driver_data;
 	struct tty_port *port = &state->tport;
+    unsigned long   flags;
 
 	if (serial_paranoia_check(state, tty->name, "rs_close"))
 		return;
@@ -1578,16 +1608,10 @@ static void rs_close(struct tty_struct *tty, struct file * filp)
 	 * interrupt driver to stop checking the data ready bit in the
 	 * line status register.
 	 */
-	state->read_status_mask &= ~UART_LSR_DR;
 	if (port->flags & ASYNC_INITIALIZED) {
-        #if defined(CONFIG_TODO)
-	        /* disable receive interrupts */
-	        custom.intena = IF_RBF;
-		mb();
-		/* clear any pending receive interrupt */
-		custom.intreq = IF_RBF;
-		mb();
-        #endif
+        spin_lock_irqsave(&uart_lock, flags);
+        rs_disable_rx_interrupts(state->line);
+        spin_unlock_irqrestore(&uart_lock, flags);
 
 		/*
 		 * Before we drop DTR, make sure the UART transmitter
@@ -1596,7 +1620,6 @@ static void rs_close(struct tty_struct *tty, struct file * filp)
 		 */
 		rs_wait_until_sent(tty, state->timeout);
 	}
-    uart_disable_rx(state->line);
 	shutdown(tty, state);
 	rs_flush_buffer(tty);
 		
@@ -1725,7 +1748,7 @@ static int rs_open(struct tty_struct *tty, struct file * filp)
     retval = tty_port_block_til_ready(port, tty, filp);
     if (retval)
     {
-#ifdef CHEETAH_UART_DEBUG_OPEN
+#ifdef SERIAL_DEBUG_OPEN
         printk("rs_open returning after block_til_ready with %d\n",
                retval);
 #endif
@@ -1734,7 +1757,7 @@ static int rs_open(struct tty_struct *tty, struct file * filp)
 
     uart_enable_rx(info->line);
 
-#ifdef CHEETAH_UART_DEBUG_OPEN
+#ifdef SERIAL_DEBUG_OPEN
     printk("rs_open %s successful...", tty->name);
 #endif
     return 0;
@@ -1806,14 +1829,14 @@ static const struct file_operations rs_proc_fops = {
 #endif
 
 #if defined(CONFIG_CONSOLE_POLL) || defined(CONFIG_CHEETAH_INTERNAL_DEBUGGER)
-int cheetah_uart_poll_init(struct tty_driver *driver, int line, char *options)
+int panther_uart_poll_init(struct tty_driver *driver, int line, char *options)
 {
     return 0;
 }
 
-int cheetah_uart_poll_get_char(struct tty_driver *driver, int line)
+int panther_uart_poll_get_char(struct tty_driver *driver, int line)
 {
-    volatile int *p = (unsigned int *) (UR_BASE + (0x100 * cta_console_index));
+    volatile int *p = (unsigned int *) (UR_BASE + (0x100 * panther_console_index));
     int ch;
 
     while (1)
@@ -1824,10 +1847,10 @@ int cheetah_uart_poll_get_char(struct tty_driver *driver, int line)
     return ch>>URBR_DTSHFT;
 }
 
-void cheetah_uart_poll_put_char(struct tty_driver *driver, int line, char ch)
+void panther_uart_poll_put_char(struct tty_driver *driver, int line, char ch)
 {
     int i;
-    volatile int *p = (unsigned int *) (UR_BASE + (0x100 * cta_console_index));
+    volatile int *p = (unsigned int *) (UR_BASE + (0x100 * panther_console_index));
 
     /* Wait for UARTA_TX register to empty */
     i = 1000000;
@@ -1892,8 +1915,8 @@ static const struct tty_operations serial_ops = {
     .chars_in_buffer = rs_chars_in_buffer,
     .flush_buffer = rs_flush_buffer,
     .ioctl = rs_ioctl,
-    //.throttle = rs_throttle,
-    //.unthrottle = rs_unthrottle,
+    .throttle = rs_throttle,
+    .unthrottle = rs_unthrottle,
     .set_termios = rs_set_termios,
     .stop = rs_stop,
     .start = rs_start,
@@ -1901,13 +1924,16 @@ static const struct tty_operations serial_ops = {
     .break_ctl = rs_break,
     .send_xchar = rs_send_xchar,
     .wait_until_sent = rs_wait_until_sent,
+	//.tiocmget = rs_tiocmget,
+	//.tiocmset = rs_tiocmset,
+	.get_icount = rs_get_icount,
 #ifdef CONFIG_CHEETAH_UART_STAT
     .proc_fops = &rs_proc_fops,
 #endif
 #ifdef CONFIG_CONSOLE_POLL
-    .poll_init  = cheetah_uart_poll_init,
-    .poll_get_char  = cheetah_uart_poll_get_char,
-    .poll_put_char  = cheetah_uart_poll_put_char,
+    .poll_init  = panther_uart_poll_init,
+    .poll_get_char  = panther_uart_poll_get_char,
+    .poll_put_char  = panther_uart_poll_put_char,
 #endif
 };
 
@@ -1915,7 +1941,18 @@ static const struct tty_port_operations panther_uart_port_ops = {
 };
 
 static struct class *rs_class;
-static int __init cheetah_rs_init(void)
+
+int uart_irqnum(int idx)
+{
+    if (idx==0)
+        return IRQ_UART0;
+    else if (idx==1)
+        return IRQ_UART1;
+    else
+        return IRQ_UART2;
+}
+
+static int __init panther_rs_init(void)
 {
     unsigned long flags;
     struct serial_state * state;
@@ -1931,15 +1968,7 @@ static int __init cheetah_rs_init(void)
         return -ENOMEM;
 
     for (i=0;i<NR_PORTS;i++)
-    {
         rs_table[i].uart_control = UARTREG(i,URCS)&URCS_CTRL_MASK;
-        if (i==0)
-            rs_table[i].irq = IRQ_UART0;
-        else if (i==1)
-            rs_table[i].irq = IRQ_UART1;
-        else
-            rs_table[i].irq = IRQ_UART2;
-    }
 
     /* Initialize the tty_driver structure */
 
@@ -1961,8 +1990,6 @@ static int __init cheetah_rs_init(void)
         state = &rs_table[i];
         state->line = i;
         state->custom_divisor = 0;
-        state->close_delay = 5*HZ/10;
-        state->closing_wait = 30*HZ;
         state->icount.cts = state->icount.dsr = 
                             state->icount.rng = state->icount.dcd = 0;
         state->icount.rx = state->icount.tx = 0;
@@ -1980,7 +2007,7 @@ static int __init cheetah_rs_init(void)
         spin_lock_irqsave(&uart_lock, flags);
 
 #if defined(CONFIG_PANTHER_PDMA)
-        if (cta_console_index==i)
+        if (panther_console_index==i)
         {
             memcpy(state->devname, "uart0_console", 13);
             state->devname[4] = '0' + i;
@@ -2004,10 +2031,10 @@ static int __init cheetah_rs_init(void)
         state->devname[5] = 0;
 #endif
 
-        if (0 > request_irq(state->irq, cta_uart_interrupt, IRQF_DISABLED, state->devname, state))
+        if (0 > request_irq(uart_irqnum(i), panther_uart_interrupt, IRQF_DISABLED, state->devname, state))
             panic("Couldn't request IRQ for UART device\n");
 
-        tasklet_init(&state->uart_irq_tasklet, cta_uart_deliver, (unsigned long) i);
+        tasklet_init(&state->uart_irq_tasklet, panther_uart_deliver, (unsigned long) i);
 #if defined(CONFIG_PANTHER_PDMA)
         if (pdma_enabled(i))
             tasklet_init(&state->pdma_rx_tasklet, uart_rx_pdma_task, (unsigned long) i);
@@ -2032,34 +2059,56 @@ static int __init cheetah_rs_init(void)
     return 0;
 }
 
-static __exit void cheetah_rs_exit(void) 
+static __exit void panther_rs_exit(void) 
 {
     int error;
+    int i;
+    struct serial_state * state;
 
     //printk("Unloading %s: version %s\n", serial_name, serial_version);
+
+#if defined(CONFIG_CHEETAH_INTERNAL_DEBUGGER)
+    unregister_idb_command(&idb_uart_cmd);
+#endif
 
     if ((error = tty_unregister_driver(serial_driver)))
         printk("SERIAL: failed to unregister serial driver (%d)\n",
                error);
     put_tty_driver(serial_driver);
 
-#if defined(CONFIG_CHEETAH_INTERNAL_DEBUGGER)
-    unregister_idb_command(&idb_uart_cmd);
-#endif
+    for (i=0;i<NR_PORTS;i++)
+    {
+        state = &rs_table[i];
+        tty_port_destroy(&state->tport);
+    }
 
+    for (i=0;i<NR_PORTS;i++)
+    {
+        state = &rs_table[i];
+        synchronize_irq(uart_irqnum(i));
+        tasklet_kill(&state->uart_irq_tasklet);
+#if defined(CONFIG_PANTHER_PDMA)
+        if (pdma_enabled(i))
+            tasklet_kill(&state->pdma_rx_tasklet);
+#endif
+    }
+
+    for (i=0;i<NR_PORTS;i++)
+        free_irq(uart_irqnum(i), state);
 }
 
-module_init(cheetah_rs_init)
-module_exit(cheetah_rs_exit)
+
+module_init(panther_rs_init)
+module_exit(panther_rs_exit)
 
 
 #ifdef CONFIG_SERIAL_CONSOLE
 
 
-void cheetah_serial_outc(unsigned char c)
+void panther_serial_outc(unsigned char c)
 {
     int i;
-    volatile unsigned int *p = (unsigned int *) (UR_BASE + (0x100 * cta_console_index));
+    volatile unsigned int *p = (unsigned int *) (UR_BASE + (0x100 * panther_console_index));
 
 #if defined(CONFIG_TODO)
     /* Disable UARTA_TX interrupts */
@@ -2086,7 +2135,7 @@ static __init int serial_console_setup(struct console *co, char *options)
     int parity = 'n';
     char *s;
     unsigned int brsr = 0;
-    unsigned int cta_uart_control;
+    unsigned int panther_uart_control;
     unsigned long flags;
 
     if (options)
@@ -2113,29 +2162,29 @@ static __init int serial_console_setup(struct console *co, char *options)
 
     spin_lock_irqsave(&uart_lock, flags);
 
-    cta_uart_control = rs_table[cta_console_index].uart_control;
+    panther_uart_control = rs_table[panther_console_index].uart_control;
 
     switch (parity)
     {
     case 'o':
     case 'O':
-        cta_uart_control|=(URCS_PE);
-        cta_uart_control&=~URCS_EVEN;
+        panther_uart_control|=(URCS_PE);
+        panther_uart_control&=~URCS_EVEN;
         break;
     case 'e':
     case 'E':
-        cta_uart_control|=(URCS_PE|URCS_EVEN);
+        panther_uart_control|=(URCS_PE|URCS_EVEN);
         break;
     default:
         break;
     }
 
     /* Write the control registers */
-    cta_uart_control = ((cta_uart_control&0x8000FFFFUL)|(brsr<<URCS_BRSHFT));
-    //cta_uart_control |= URCS_RXEN;         // enable RX
+    panther_uart_control = ((panther_uart_control&0x8000FFFFUL)|(brsr<<URCS_BRSHFT));
+    //panther_uart_control |= URCS_RXEN;         // enable RX
 
-    rs_table[cta_console_index].uart_control = cta_uart_control;
-    UARTREG(cta_console_index, URCS) = cta_uart_control;
+    rs_table[panther_console_index].uart_control = panther_uart_control;
+    UARTREG(panther_console_index, URCS) = panther_uart_control;
 
     spin_unlock_irqrestore(&uart_lock, flags);
 
@@ -2148,20 +2197,20 @@ static void serial_console_write(struct console *co, const char *s,
     while (count--)
     {
         if (*s == '\n')
-            cheetah_serial_outc('\r');
-        cheetah_serial_outc(*s++);
+            panther_serial_outc('\r');
+        panther_serial_outc(*s++);
     }
 }
 
 static struct tty_driver *serial_console_device(struct console *c, int *index)
 {
-    *index = cta_console_index;
+    *index = panther_console_index;
     return serial_driver;
-    //*index = cta_console_index;
-    //return &serial_driver[cta_console_index];
+    //*index = panther_console_index;
+    //return &serial_driver[panther_console_index];
 }
 
-static struct console cta_console = {
+static struct console panther_console = {
     .name =     "ttyS",
     .write =    serial_console_write,
     .device =   serial_console_device,
@@ -2173,12 +2222,12 @@ static struct console cta_console = {
 /*
  *	Register console.
  */
-static int __init cheetah_serial_console_init(void)
+static int __init panther_serial_console_init(void)
 {
-    register_console(&cta_console);
+    register_console(&panther_console);
     return 0;
 }
-console_initcall(cheetah_serial_console_init);
+console_initcall(panther_serial_console_init);
 
 #endif
 
@@ -2190,13 +2239,13 @@ static int __init _console_setup(char *str)
     unsigned int brsr;
 
     if (!strncmp("ttyS", str, 4))
-        cta_console_index = str[4] - '0';
+        panther_console_index = str[4] - '0';
 
     brsr = urcs_cal_baud_cnt(CONFIG_CHEETAH_UART_BAUDRATE);
-    p = (unsigned int *) (UR_BASE + URCS + (0x100 * cta_console_index));
+    p = (unsigned int *) (UR_BASE + URCS + (0x100 * panther_console_index));
     *p =  ((*p &0x8000FFFFUL)|(brsr<<URCS_BRSHFT));
 
-    cta_console.index = cta_console_index;
+    panther_console.index = panther_console_index;
 
     return 0;
 }
