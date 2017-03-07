@@ -36,6 +36,19 @@ void vsmp_resume(void);
 void vsmp_suspend(void);
 #endif
 
+/* 
+   NOTE:
+   
+   1. test suspend function with following command
+      The system will offline all CPUs except CPU0 and then suspend
+      echo mem > /sys/power/state
+   
+   2. stand-alone test cpu1 offline
+      echo 0 > /sys/devices/system/cpu/cpu1/online 
+
+   3. stand-alone test cpu1 online
+      echo 1 > /sys/devices/system/cpu/cpu1/online  
+*/
 void panther_machine_suspend(void)
 {
     void (*func) (void);

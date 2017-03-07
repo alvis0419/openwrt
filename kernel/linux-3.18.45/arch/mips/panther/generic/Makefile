@@ -8,7 +8,7 @@
 obj-$(CONFIG_CHEETAH) += init.o setup.o reset.o prom.o time.o int.o uart_pdma.o platform.o
 #pwr.o cta_gpio_hotplug.o clk.o mactbl.o
 
-#obj-$(CONFIG_PM) += pm.o
+obj-$(CONFIG_PM) += pm.o
 
 #obj-$(CONFIG_CHEETAH_INTERNAL_DEBUGGER)	+= idb.o
 

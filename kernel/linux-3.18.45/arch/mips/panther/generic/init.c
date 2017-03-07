@@ -113,7 +113,6 @@ void __init probe_system_speed(void)
 
 }
 
-extern struct plat_smp_ops msmtc_smp_ops;
 #include <asm/mipsregs.h>
 void __init prom_init(void)
 {
@@ -134,16 +133,14 @@ void __init prom_init(void)
 
 #ifdef CONFIG_MIPS_CMP
 #error not support CONFIG_MIPS_CMP
-	register_smp_ops(&cmp_smp_ops);
 #endif
 
 #ifdef CONFIG_MIPS_MT_SMP
-        register_smp_ops(&vsmp_smp_ops);
+    register_vsmp_smp_ops();
 #endif
 
 #ifdef CONFIG_MIPS_MT_SMTC
 #error CONFIG_MIPS_MT_SMTC not implement yet!
-	register_smp_ops(&msmtc_smp_ops);
 #endif
 }
 

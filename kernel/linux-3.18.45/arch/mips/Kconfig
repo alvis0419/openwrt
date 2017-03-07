@@ -371,10 +371,10 @@ config CHEETAH
 	select NO_EXCEPT_FILL
 	select ARCH_REQUIRE_GPIOLIB
 	select ARCH_WANT_OPTIONAL_GPIOLIB
-	#select SYS_SUPPORTS_SMP
-	#select NR_CPUS_DEFAULT_2
+	select SYS_SUPPORTS_SMP
+	select NR_CPUS_DEFAULT_2
 	#select MIPS_MT_SMP
-	#select SYS_SUPPORTS_HOTPLUG_CPU
+	select SYS_SUPPORTS_HOTPLUG_CPU
 	help
 	  This enables support for the Panther based platform.
 
