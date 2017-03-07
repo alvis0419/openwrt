@@ -297,10 +297,10 @@ static void __init vsmp_smp_setup(void)
 
 static void __init vsmp_prepare_cpus(unsigned int max_cpus)
 {
-#ifdef CONFIG_HOTPLUG_CPU
+#if 0 //def CONFIG_HOTPLUG_CPU
 	set_cpu_present(1, true);
+	set_cpu_possible(1, true);
 #endif
-
 	mips_mt_set_cpuoptions();
 }
 

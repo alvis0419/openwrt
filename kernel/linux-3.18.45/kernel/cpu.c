@@ -364,7 +364,7 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen)
 		return -EINVAL;
 
 	cpu_hotplug_begin();
-
+printk("CPU%d ::1 %d\n", smp_processor_id(), cpu);
 	err = __cpu_notify(CPU_DOWN_PREPARE | mod, hcpu, -1, &nr_calls);
 	if (err) {
 		nr_calls--;
@@ -373,7 +373,7 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen)
 			__func__, cpu);
 		goto out_release;
 	}
-
+printk("CPU%d ::2\n", smp_processor_id());
 	/*
 	 * By now we've cleared cpu_active_mask, wait for all preempt-disabled
 	 * and RCU users of this state to go away such that all new such users
@@ -387,21 +387,31 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen)
 #ifdef CONFIG_PREEMPT
 	synchronize_sched();
 #endif
-	synchronize_rcu();
 
+printk("CPU%d ::3\n", smp_processor_id());
+	synchronize_rcu();
+#if 0
+    stop_one_cpu(cpu, take_cpu_down, &tcd_param);
+#else
+printk("CPU%d ::4 %d\n", smp_processor_id(), cpu);
 	smpboot_park_threads(cpu);
 
+
+printk("CPU%d ::5\n", smp_processor_id());
 	/*
 	 * So now all preempt/rcu users must observe !cpu_active().
 	 */
-
+printk("CPU%d ::6\n", smp_processor_id());
 	err = __stop_machine(take_cpu_down, &tcd_param, cpumask_of(cpu));
 	if (err) {
+printk("CPU%d ::6 err %d\n", smp_processor_id(), err);
 		/* CPU didn't die: tell everyone.  Can't complain. */
 		smpboot_unpark_threads(cpu);
 		cpu_notify_nofail(CPU_DOWN_FAILED | mod, hcpu);
 		goto out_release;
 	}
+printk("---->7\n");
+#endif
 	BUG_ON(cpu_online(cpu));
 
 	/*

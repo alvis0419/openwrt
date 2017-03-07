@@ -30,6 +30,10 @@ static void cheetah_machine_halt(void)
 {
     unsigned long flags;
 
+#ifdef CONFIG_SMP
+	//smp_send_stop();
+#endif
+
     spin_lock_irqsave(&system_reset_lock, flags);
 
     REG_WRITE32(PMU_WATCHDOG, 0x0);
