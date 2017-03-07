@@ -311,8 +311,7 @@ static void uart_rx_pdma_done(u32 channel, u32 intr_status)
 volatile u32 desc_config_read;
 static void uart_rx_pdma_task(unsigned long idx)
 {
-    struct serial_state *info = rs_table[idx].info;
-    struct tty_struct *tty = info->tport.tty;
+    struct serial_state *info = &rs_table[idx];
     int rx_buf_idx;
     u32 len;
     unsigned char *data_buf;
@@ -359,17 +358,18 @@ static void uart_rx_pdma_task(unsigned long idx)
             data_buf = rs_table[idx].pdma_rx_buf[rx_buf_idx];
 #if 1
             //tty_insert_flip_string_flags(tty, data_buf, &flag, len);
-            tty_insert_flip_string(&rs_table[idx].tport, data_buf, len);
+            tty_insert_flip_string(&info->tport, data_buf, len);
 
             dma_cache_inv((unsigned long) data_buf, len);
 #else
             flag = TTY_NORMAL;
             for (i = 0; i < len; i++)
             {
-                tty_insert_flip_char(tty, *(data_buf + i), flag);
+                tty_insert_flip_char(&info->tport, *(data_buf + i), flag);
             }
 #endif
-            tty_schedule_flip(tty);
+            tty_flip_buffer_push(&info->tport);
+            //tty_schedule_flip(&info->tport);
             info->icount.rx += len;
         }
 
@@ -696,15 +696,14 @@ static irqreturn_t panther_uart_interrupt(int irq, void *data)
 
 static void uart_tx_pdma_task(unsigned long idx)
 {
-    struct serial_state *info = rs_table[idx].info;
-    //struct tty_struct *tty = info->tty;
+    struct serial_state *info = &rs_table[idx];
     int tx_buf_idx;
     u32 len;
     unsigned char *data_buf;
     struct pdma_ch_descr *txdescr;
     //int i;
 
-    if (info->xmit.head == info->xmit.tail || info->tty->stopped || info->tty->hw_stopped)
+    if (info->xmit.head == info->xmit.tail || info->tport.tty->stopped || info->tport.tty->hw_stopped)
         return;
 
     txdescr = (struct pdma_ch_descr *) UNCACHED_ADDR(&pdma_uart_tx_descr[idx][0]);
