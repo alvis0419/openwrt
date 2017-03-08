@@ -1,0 +1,728 @@
+if CHEETAH
+config CHEETAH_FPGA
+	bool "Cheetah FPGA platform"
+	depends on CHEETAH
+	default n
+
+config MTD_CHEETAH
+	tristate "Flash device mapped on Cheetah"
+	depends on CHEETAH
+	select MTD
+	select MTD_COMPLEX_MAPPINGS
+	select MTD_ROM
+	select MTD_PARTITIONS
+	default y
+	help
+	  This enables access routines for the flash chips on the Cheetah board
+
+#config SF_RX_DIV
+#	int "the clock factor for flash SPI Rx commands"
+#	range 2 15
+#	depends on MTD_CHEETAH
+#	default 3
+
+#config SF_TX_DIV
+#	int "the clock factor for flash SPI Tx commands"
+#	range 0 15
+#	depends on MTD_CHEETAH
+#	default 3
+
+config CHEETAH_MTD_SIZE
+	hex "Flash size"
+	depends on MTD_CHEETAH
+	default 0x800000
+
+config PANTHER_KERNEL_SIZE
+	hex "Kernel partitions size"
+	depends on MTD_CHEETAH
+	default 0x200000
+
+#config CHEETAH_BACKUP_IMAGE
+#	bool "Consider Backup Partition"
+#	depends on MTD_CHEETAH
+#	default n
+#	help
+#	  Say Y here to support flash with backup image.
+#config CHEETAH_BACKUP_SIZE
+#	hex "The Paritiion Size for Backup Image"
+#	range 0 CHEETAH_MTD_SIZE
+#	depends on CHEETAH_BACKUP_IMAGE
+#	default 0x300000
+#config CHEETAH_BACKUP_IMAGE_BUILD
+#	bool "Build Backup Image"
+#	depends on CHEETAH_BACKUP_IMAGE
+#	default n
+#	help
+#	  Say Y here to build a backup image.
+
+config CHEETAH_MTD_SE
+	bool "Sector erase"
+	depends on MTD_CHEETAH
+	default y
+
+config DYNAMIC_PARTITION_ROOTFS
+	bool "dynamic partition for rootfs"
+	depends on MTD_CHEETAH
+	default y
+
+choice
+	prompt "read&write paritiion"
+	depends on MTD_CHEETAH
+	default MTD_ROOTFS_SPLIT
+config MTD_RWPART_NONE
+	bool "None"
+config MTD_ROOTFS_SPLIT
+	bool "split from rootfs partition(squashfs)"
+config MTD_RWPART_EXTRA_PARTITION
+	bool "extra partition"
+endchoice
+
+#config MTD_RWPART_EXTRA_PARTITION_OFFSET
+#	hex "the offset of extra partition"
+#	depends on MTD_RWPART_EXTRA_PARTITION
+#	default 0x400000
+
+config CHEETAH_ANA_KEYPAD
+	bool "Cheetah ana Keypad"
+	depends on CHEETAH
+	default n
+	help
+		This enable cheetah ana keypad.
+
+config CHEETAH_KEYPAD		 
+	bool "Cheetah Keypad"		 
+	depends on CHEETAH
+	select CHEETAH_MADC			 
+	default n		 
+	help		 
+		This enable cheetah keypad.
+
+config CHEETAH_LCD
+	bool "Cheetah lcd"
+	depends on CHEETAH
+	default n
+	help
+		This enable cheetah lcd.
+choice
+	depends on CHEETAH_LCD
+	prompt "Cheetah type"
+	default CHEETAH_ST7565P_LCD
+config CHEETAH_ST7565P_LCD
+	bool "st7565p"
+config CHEETAH_ST7588T_LCD
+	bool "st7588t"
+endchoice
+
+config CHEETAH_ST7565P_LCD_GPIO_CS1
+	int "GPIO Number for st7565p CS1 pin"
+	range 0 29
+	depends on CHEETAH_ST7565P_LCD
+	default 20
+config CHEETAH_ST7565P_LCD_GPIO_A0
+	int "GPIO Number for st7565p A0 pin"
+	range 0 29
+	depends on CHEETAH_ST7565P_LCD
+	default 22
+config CHEETAH_ST7565P_LCD_GPIO_SDI
+	int "GPIO Number for st7565p SDI pin"
+	range 0 29
+	depends on CHEETAH_ST7565P_LCD
+	default 21
+config CHEETAH_ST7565P_LCD_GPIO_SCL
+	int "GPIO Number for st7565p SCL pin"
+	range 0 29
+	depends on CHEETAH_ST7565P_LCD
+	default 23
+
+config CHEETAH_ST7588T_LCD_GPIO_SDA
+	int "GPIO Number for st7588t SDA pin"
+	range 0 29
+	depends on CHEETAH_ST7588T_LCD
+	default 22
+config CHEETAH_ST7588T_LCD_GPIO_SCL
+	int "GPIO Number for st7588t SCL pin"
+	range 0 29
+	depends on CHEETAH_ST7588T_LCD
+	default 23
+
+config CHEETAH_MADC
+	bool "Cheetah madc"
+	depends on CHEETAH
+	default n
+	help
+		This enable cheetah madc.
+ 
+config CHEETAH_PWM
+	bool "Cheetah pwm"
+	depends on CHEETAH
+	default n
+	help
+		This enable cheetah pwm.
+
+config CHEETAH_4M_JFFS2
+	bool "To reserve 4M jffs2"
+	depends on CHEETAH
+	default n
+	help
+		This enable to reserve 4M jffs2. 
+
+
+config CHEETAH_HW_TIMER
+	bool "Cheetah HW TIMER"
+	depends on CHEETAH && NO_HZ 
+	default n
+	help
+		This enable hw to write delta time in the next event for CONFIG_NO_HZ enable.
+
+config CHEETAH_WLAN
+	bool "Dragonite WLAN driver"
+	depends on CHEETAH
+	default n
+
+config CHEETAH_ETH
+	bool "Cheetah Ethernet"
+	depends on CHEETAH
+	select VLAN_8021Q
+
+config CHEETAH_SKB_RECYCLE_2K
+	bool "SKB Recycling"
+	depends on CHEETAH_ETH
+	default n
+
+config P0_AS_LAN
+	bool "Switch P0 as LAN"
+	depends on CHEETAH_ETH
+	default n
+
+config P0_AS_ADDR2
+	bool "Switch P0 as addr 2"
+	depends on CHEETAH_ETH
+	default n
+
+config P0_EXT_PHY
+	bool "Switch P0 as External PHY"
+	depends on CHEETAH_ETH
+	select P0_RMII
+	select P0_RMII_CLKOUT
+	default n
+
+config P0_RMII
+	depends on P0_EXT_PHY
+	bool
+	default n
+
+config P0_RMII_CLKOUT
+	depends on P0_EXT_PHY
+	bool
+	default n
+
+config P1_EXT_PHY
+	bool "Switch P1 as External PHY"
+	depends on CHEETAH_ETH
+	default n
+
+config P1_RMII
+	depends on CHEETAH_ETH
+	bool
+	default y
+
+config P1_RMII_CLKOUT
+	depends on CHEETAH_ETH
+	bool
+	default y
+
+config EPHY_GLITCH_PATCH
+	bool "EPHY glitch patch"
+	depends on CHEETAH_ETH && CHEETAH_USB
+	default n
+
+config HNAT_PATCH
+	bool "HW-NAT patch"
+	depends on CHEETAH_ETH
+	default y
+
+config SRAM_ENABLE
+	bool "SRAM Enable"
+	depends on CHEETAH
+
+config SRAM_BASE
+	hex "SRAM Base address"
+	depends on SRAM_ENABLE && CHEETAH
+	default 0xffffffff83f00000
+
+config SRAM_SIZE
+	int "SRAM size"
+	depends on SRAM_ENABLE && CHEETAH
+	default 128
+
+config SWITCH_BUF_SIZE
+	int "Switch buffer size"
+	depends on CHEETAH
+	default 512
+
+config SWITCH_BUF_COUNT
+	int "Switch buffer header counter"
+	depends on CHEETAH
+	default 128
+
+config CHEETAH_INTERNAL_DEBUGGER
+	bool "Cheetah internal debugger"
+	depends on CHEETAH
+	default y
+
+config CHEETAH_ENABLE_DEBUGFS
+	bool "Cheetah debug via debugfs"
+	depends on CHEETAH
+	select DEBUG_FS
+	default n
+
+config CHEETAH_SND
+	tristate "Cheetah Sound driver"
+	depends on CHEETAH
+	select SOUND
+	select SND
+	select SND_PCM_OSS
+	select SND_SOC
+	select NET
+	select COMPAT_WIRELESS
+	select COMPAT_PATCH
+	default n
+
+config CHEETAH_SND_DEDICATED_I2C
+	bool "Dedicated I2C Pins For Codec"
+	depends on CHEETAH_SND
+	default y
+config CHEETAH_SND_SCL_GPIO_NUM
+	int "GPIO Number for I2C Clock (0~29)"
+	range 0 29
+	depends on CHEETAH_SND_DEDICATED_I2C
+	default 10
+config CHEETAH_SND_SDA_GPIO_NUM
+	int "GPIO Number for I2C Data (0~29)"
+	range 0 29
+	depends on CHEETAH_SND_DEDICATED_I2C
+	default 11
+
+config PCMGPIOCONTROL
+	bool "PCMGPIOCONTROL"
+	depends on CHEETAH_SND
+	default n
+
+config GPIO_AUDIO_AMP_POWER
+	bool "Use GPIO to Control Audio AMP Power"
+	depends on CHEETAH_SND
+	default n
+
+config GPIO_AUDIO_AMP_POWER_NUM
+	int "GPIO Number to Control Audio AMP Power (0~29)"
+	range 0 29
+	depends on GPIO_AUDIO_AMP_POWER
+	default 7
+
+config GPIO_AUDIO_AMP_POWER_LOW_ACTIVE
+	bool "Low Active"
+	depends on GPIO_AUDIO_AMP_POWER
+	default y
+
+config CHEETAH_SND_PCM0
+	bool "PCM module 0"
+	depends on CHEETAH_SND
+	default y
+
+choice
+	prompt "PCM0 Codec select"
+	depends on CHEETAH_SND_PCM0
+	default CHEETAH_SND_WM8750
+
+config CHEETAH_SND_PCM0_TLV320AIC3111
+	bool "Texas Instruments TLV320AIC31xx CODECs"
+	select I2C
+	select MONTAGE_I2C
+
+config CHEETAH_SND_PCM0_WM8750
+	bool "Wolfson WM8750"
+	select I2C
+	select MONTAGE_I2C
+
+config CHEETAH_SND_PCM0_WM8988
+	bool "Wolfson WM8988"
+	select I2C
+	select MONTAGE_I2C
+
+config CHEETAH_SND_PCM0_NAU8822
+	bool "Nuvoton NAU8822"
+	select I2C
+	select MONTAGE_I2C
+
+config CHEETAH_SND_PCM0_TAS5711
+	bool "Texas TAS5711"
+	select I2C
+	select MONTAGE_I2C
+
+config CHEETAH_SND_PCM0_ES8316
+	bool "Everest Semiconductor ES8316"
+	select I2C
+	select MONTAGE_I2C
+	select GPIO_AUDIO_AMP_POWER
+	help
+	  This codec has to enable AUDIO_AMP_POWER: GPIO9
+
+config CHEETAH_SND_PCM0_ES9023
+	bool "ES9023"
+
+config CHEETAH_SND_PCM0_MP320
+	bool "Maples MP320"
+	select I2C
+	select MONTAGE_I2C
+
+config CHEETAH_SND_PCM0_WM8737
+	bool "Wolfson WM8737"
+	select I2C
+	select MONTAGE_I2C
+
+endchoice
+
+choice
+	prompt "Select WM8xxx Input Source"
+	depends on CHEETAH_SND_PCM0
+	depends on CHEETAH_SND_PCM0_WM8750 || CHEETAH_SND_PCM0_WM8988 || CHEETAH_SND_PCM0_WM8737
+	default CHEETAH_SND_PCM0_WM8xxx_INPUT2
+
+config CHEETAH_SND_PCM0_WM8xxx_INPUT1
+	bool "Input1"
+
+config CHEETAH_SND_PCM0_WM8xxx_INPUT2
+	bool "Input2"
+
+config CHEETAH_SND_PCM0_WM8xxx_INPUT3
+	bool "Input3"
+endchoice
+
+choice
+	prompt "Select MP320 Input Source"
+	depends on CHEETAH_SND_PCM0
+	depends on CHEETAH_SND_PCM0_MP320
+	default CHEETAH_SND_PCM0_MP320_INPUT2
+
+config CHEETAH_SND_PCM0_MP320_INPUT1
+	bool "Input1"
+
+config CHEETAH_SND_PCM0_MP320_INPUT2
+	bool "Input2"
+
+config CHEETAH_SND_PCM0_MP320_INPUT3
+	bool "Input3"
+endchoice
+
+config CHEETAH_SND_PCM1
+	bool "PCM module 1"
+	depends on CHEETAH_SND
+	default n
+
+choice
+	prompt "PCM1 Codec select"
+	depends on CHEETAH_SND_PCM1
+	default CHEETAH_SND_WM8750
+
+config CHEETAH_SND_PCM1_WM8750
+	bool "Wolfson WM8750"
+	select I2C
+	select MONTAGE_I2C
+
+config CHEETAH_SND_PCM1_WM8988
+	bool "Wolfson WM8988"
+	select I2C
+	select MONTAGE_I2C
+
+config CHEETAH_SND_PCM1_NAU8822
+	bool "Nuvoton NAU8822"
+	select I2C
+	select MONTAGE_I2C
+
+config CHEETAH_SND_PCM1_TAS5711
+	bool "Texas TAS5711"
+	select I2C
+	select MONTAGE_I2C
+
+config CHEETAH_SND_PCM1_MP320
+	bool "Maples MP320"
+	select I2C
+	select MONTAGE_I2C
+
+config CHEETAH_SND_PCM1_WM8737
+	bool "Wolfson WM8737"
+	select I2C
+	select MONTAGE_I2C
+
+endchoice
+
+choice
+	prompt "Select WM8xxx Input Source"
+	depends on CHEETAH_SND_PCM1
+	depends on CHEETAH_SND_PCM1_WM8750 || CHEETAH_SND_PCM1_WM8988 || CHEETAH_SND_PCM1_WM8737
+	default CHEETAH_SND_PCM1_WM8xxx_INPUT2
+
+config CHEETAH_SND_PCM1_WM8xxx_INPUT1
+	bool "Input1"
+
+config CHEETAH_SND_PCM1_WM8xxx_INPUT2
+	bool "Input2"
+
+config CHEETAH_SND_PCM1_WM8xxx_INPUT3
+	bool "Input3"
+endchoice
+
+choice
+	prompt "Select MP320 Input Source"
+	depends on CHEETAH_SND_PCM1
+	depends on CHEETAH_SND_PCM1_MP320
+	default CHEETAH_SND_PCM1_MP320_INPUT2
+
+config CHEETAH_SND_PCM1_MP320_INPUT1
+	bool "Input1"
+
+config CHEETAH_SND_PCM1_MP320_INPUT2
+	bool "Input2"
+
+config CHEETAH_SND_PCM1_MP320_INPUT3
+	bool "Input3"
+endchoice
+
+config CHEETAH_USB
+	bool
+
+choice
+	bool "Cheetah USB0 driver"
+	depends on CHEETAH
+	default CHEETAH_USB_NONE
+
+config CHEETAH_USB_NONE
+	bool "None"
+
+config CHEETAH_USB_HOST_ROLE
+	bool "As USB Host"
+	select USB_SUPPORT
+	select USB
+	select USB_EHCI_HCD
+	select USB_EHCI_MT
+	select CHEETAH_USB
+
+config CHEETAH_USB_DEVICE_ROLE
+	bool "As USB Device"
+	select USB_SUPPORT
+	select USB_GADGET
+	select CHEETAH_USB
+
+config CHEETAH_USB_DUAL_ROLE
+	bool "Dual role by VBus Detection"
+	select USB_SUPPORT
+	select USB
+	select USB_EHCI_HCD
+	select USB_EHCI_MT
+	select USB_GADGET
+	select CHEETAH_USB
+endchoice
+
+choice
+	bool "Cheetah USB1 driver"
+	depends on CHEETAH
+	default CHEETAH_USB1_NONE
+
+config CHEETAH_USB1_NONE
+	bool "None"
+
+config CHEETAH_USB1_HOST_ROLE
+	bool "As USB Host"
+	select USB_SUPPORT
+	select USB
+	select USB_EHCI_HCD
+	select USB_EHCI_MT
+	select CHEETAH_USB
+
+config CHEETAH_USB1_DEVICE_ROLE
+	bool "As USB Device"
+	select USB_SUPPORT
+	select USB_GADGET
+	select CHEETAH_USB
+endchoice
+
+config CHEETAH_SDHCI
+	tristate "Cheetah SDHCI driver"
+	depends on CHEETAH
+	select MMC
+	select MMC_SDHCI_IO_ACCESSORS
+	default n
+
+config CHEETAH_SDHCI_VOLTAGE_CTRL
+	bool "SDHCI 3.3 or 1.8 voltage control by software"
+	depends on CHEETAH_SDHCI
+	default n
+
+config CHEETAH_MMCSPI
+	tristate "Cheetah MMC SPI driver"
+	depends on CHEETAH
+	select SPI_MASTER
+#	select MMC_SPI
+#	help: using CHEETAH_MMCSPI to replace MMC_SPI
+	select CRC7
+	select CRC_ITU_T
+	select SPI_GPIO
+	default n
+
+config CHEETAH_SPI_SCK_GPIO_NUM
+	int "GPIO Number for SPI SCK (0~29)"
+	range 0 29
+	depends on CHEETAH_MMCSPI
+	default 3
+
+config CHEETAH_SPI_MOSI_GPIO_NUM
+	int "GPIO Number for SPI MOSI (0~29)"
+	range 0 29
+	depends on CHEETAH_MMCSPI
+	default 2
+
+config CHEETAH_SPI_MISO_GPIO_NUM
+	int "GPIO Number for SPI MISO (0~29)"
+	range 0 29
+	depends on CHEETAH_MMCSPI
+	default 24
+
+config CHEETAH_SPI_CS_GPIO_NUM
+	int "GPIO Number for SPI CS (0~29)"
+	range 0 29
+	depends on CHEETAH_MMCSPI
+	default 27
+
+config CHEETAH_SPI_CD_GPIO_NUM
+	int "GPIO Number for SPI CD (0~29)"
+	range 0 29
+	depends on CHEETAH_MMCSPI
+	default 5
+
+config CHEETAH_SPI_IRQ_GPIO_NUM
+	int "GPIO Number for SPI IRQ (0~29)"
+	range 0 29
+	depends on CHEETAH_MMCSPI
+	default 25
+
+config CHEETAH_GSPI
+	bool "Cheetah GSPI driver"
+	depends on CHEETAH
+	select SPI
+	default n
+
+config CHEETAH_BOOTLOADER_CDB
+	bool "Support reading bootloader parameters via PROCFS"
+	depends on PROC_FS && CHEETAH
+	default n
+
+config FLASH_BASE
+	hex "FlashROM base address"
+	depends on CHEETAH_BOOTLOADER_CDB
+	default 0xbe000000
+
+config BOOT_PARM_OFS
+	hex "Boot parameters offset"
+	depends on CHEETAH_BOOTLOADER_CDB
+	default 0x2000
+
+config BOOT_PARM_SZ
+	hex "Boot parameters size"
+	depends on CHEETAH_BOOTLOADER_CDB
+	default 0x4000
+
+config PANTHER_PDMA
+	bool "Panther PDMA engine"
+	depends on CHEETAH
+	default y
+
+config CHEETAH_GDMA
+	bool "Cheetah GDMA engine"
+	depends on CHEETAH
+	default y
+
+config CHEETAH_GVCOM
+	bool "Cheetah GPIO Virtual COM"
+	depends on CHEETAH
+	default n
+
+config CHEETAH_GVCOM_TX_GPIO_NUM
+	int "GPIO Number for Virtaul COM TX (0~29)"
+	range 0 29
+	depends on CHEETAH_GVCOM
+	default 14
+
+config CHEETAH_GVCOM_RX_GPIO_NUM
+	int "GPIO Number for Virtaul COM RX (0~29)"
+	range 0 29
+	depends on CHEETAH_GVCOM
+	default 15
+
+choice
+	prompt "Select Default Baud Rate"
+	depends on CHEETAH_GVCOM && !CHEETAH_GVCOM_CONSOLE
+	default CHEETAH_GVCOM_B38400
+config CHEETAH_GVCOM_B9600
+	bool "9600"
+config CHEETAH_GVCOM_B14400
+	bool "14400"
+config CHEETAH_GVCOM_B19200
+	bool "19200"
+config CHEETAH_GVCOM_B38400
+	bool "38400"
+config CHEETAH_GVCOM_B57600
+	bool "57600"
+config CHEETAH_GVCOM_B115200
+	bool "115200"
+endchoice
+
+config CHEETAH_GVCOM_CONSOLE
+	bool "Virtual COM is Console (Baud Rate:9600)"
+	depends on CHEETAH_GVCOM
+	default n
+
+config CHEETAH_GVCOM_DUMMY
+	bool "Virtual COM is Dummy"
+	depends on CHEETAH_GVCOM
+	default n
+
+config CHEETAH_GI2C
+	bool "Cheetah GPIO I2C"
+	depends on CHEETAH
+	select I2C
+	select I2C_GPIO
+	select I2C_CHARDEV
+
+config CHEETAH_GI2C_SCL_GPIO_NUM
+	int "GPIO Number for I2C Clock (0~29)"
+	range 0 29
+	depends on CHEETAH_GI2C
+	default 14
+config CHEETAH_GI2C_SDA_GPIO_NUM
+	int "GPIO Number for I2C Data (0~29)"
+	range 0 29
+	depends on CHEETAH_GI2C
+	default 15
+
+config CHEETAH_UART_BAUDRATE
+	int "UART Baud Rate"
+	depends on CHEETAH
+	default 115200
+
+config CHEETAH_VERSION_CODE
+	hex "Cheetah SoC version"
+	depends on CHEETAH
+	default 0x20
+
+config MONTAGE_I2C
+        bool "I2C hardware bus support"
+        depends on I2C
+        default y
+		
+config MONTAGE_WATCHDOG
+        bool "Watchdog Timer support"
+        depends on WATCHDOG
+        default y
+        help
+          Hardware driver for the built-in watchdog timer.
+endif

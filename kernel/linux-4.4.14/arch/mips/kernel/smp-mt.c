@@ -36,7 +36,11 @@
 #include <asm/mipsmtregs.h>
 #include <asm/mips_mt.h>
 
+#ifdef CONFIG_HOTPLUG_CPU
+static void smvp_copy_vpe_config(void)
+#else
 static void __init smvp_copy_vpe_config(void)
+#endif
 {
 	write_vpe_c0_status(
 		(read_c0_status() & ~(ST0_IM | ST0_IE | ST0_KSU)) | ST0_CU0);
@@ -53,8 +57,13 @@ static void __init smvp_copy_vpe_config(void)
 	write_vpe_c0_count(read_c0_count());
 }
 
+#ifdef CONFIG_HOTPLUG_CPU
+static unsigned int smvp_vpe_init(unsigned int tc, unsigned int mvpconf0,
+	unsigned int ncpu)
+#else
 static unsigned int __init smvp_vpe_init(unsigned int tc, unsigned int mvpconf0,
 	unsigned int ncpu)
+#endif
 {
 	if (tc > ((mvpconf0 & MVPCONF0_PVPE) >> MVPCONF0_PVPE_SHIFT))
 		return ncpu;
@@ -85,7 +94,11 @@ static unsigned int __init smvp_vpe_init(unsigned int tc, unsigned int mvpconf0,
 	return ncpu;
 }
 
+#ifdef CONFIG_HOTPLUG_CPU
+static void smvp_tc_init(unsigned int tc, unsigned int mvpconf0)
+#else
 static void __init smvp_tc_init(unsigned int tc, unsigned int mvpconf0)
+#endif
 {
 	unsigned long tmp;
 
@@ -158,6 +171,11 @@ static void vsmp_send_ipi_mask(const struct cpumask *mask, unsigned int action)
 
 static void vsmp_init_secondary(void)
 {
+#if defined(CONFIG_CHEETAH)
+    change_c0_status(ST0_IM, STATUSF_IP0 | STATUSF_IP1 | STATUSF_IP2 | STATUSF_IP7);
+    return;
+#endif
+
 #ifdef CONFIG_MIPS_GIC
 	/* This is Malta specific: IPI,performance and timer interrupts */
 	if (gic_present)
@@ -231,7 +249,11 @@ static void vsmp_boot_secondary(int cpu, struct task_struct *idle)
  * Make sure all CPU's are in a sensible state before we boot any of the
  * secondaries
  */
+#ifdef CONFIG_HOTPLUG_CPU
+static void vsmp_smp_setup(void)
+#else
 static void __init vsmp_smp_setup(void)
+#endif
 {
 	unsigned int mvpconf0, ntc, tc, ncpu = 0;
 	unsigned int nvpe;
@@ -276,8 +298,110 @@ static void __init vsmp_smp_setup(void)
 
 static void __init vsmp_prepare_cpus(unsigned int max_cpus)
 {
+#if 0 //def CONFIG_HOTPLUG_CPU
+	set_cpu_present(1, true);
+	set_cpu_possible(1, true);
+#endif
 	mips_mt_set_cpuoptions();
 }
+
+#ifdef CONFIG_HOTPLUG_CPU
+void reassign_irqs(void);
+void panther_irq_spin_lock(void);
+void panther_irq_spin_unlock(void);
+static int vsmp_cpu_disable(void)
+{
+	unsigned int cpu = smp_processor_id();
+
+	if (cpu == 0)
+		return -EBUSY;
+
+    panther_irq_spin_lock();
+
+	set_cpu_online(cpu, false);
+	cpumask_clear_cpu(cpu, &cpu_callin_map);
+
+	local_irq_disable();
+	reassign_irqs();
+	local_irq_enable();
+
+	flush_cache_all();
+	local_flush_tlb_all();
+
+    panther_irq_spin_unlock();
+
+	return 0;
+}
+
+static void vsmp_cpu_die(unsigned int cpu)
+{
+	unsigned long tmp;
+	if (cpu == 0)
+            return;
+
+	dvpe();
+	set_c0_mvpcontrol(MVPCONTROL_VPC);
+
+	settc(cpu);
+
+	/* restart */
+	//write_tc_c0_tcrestart((unsigned long)&smp_bootstrap);
+
+	/* enable the tc this vpe/cpu will be running */
+	//write_tc_c0_tcstatus((read_tc_c0_tcstatus() & ~TCSTATUS_IXMT) | TCSTATUS_A);
+
+	write_tc_c0_tchalt(1);
+
+	tmp = read_vpe_c0_vpeconf0();
+	  
+	tmp &= ~VPECONF0_VPA;
+	      
+	/* master VPE */
+	tmp |= VPECONF0_MVP;
+	write_vpe_c0_vpeconf0(tmp);
+
+	/* enable the VPE */
+	//write_vpe_c0_vpeconf0(read_vpe_c0_vpeconf0() | VPECONF0_VPA);
+
+	/* stack pointer */
+	//write_tc_gpr_sp( __KSTK_TOS(idle));
+
+	/* global pointer */
+	//write_tc_gpr_gp((unsigned long)gp);
+
+	//flush_icache_range((unsigned long)gp,
+	//                   (unsigned long)(gp + sizeof(struct thread_info)));
+
+	/* finally out of configuration and into chaos */
+	clear_c0_mvpcontrol(MVPCONTROL_VPC);
+
+	evpe(EVPE_ENABLE);
+}
+
+void vsmp_suspend(void)
+{
+	//mips_mt_regdump(dvpe());
+	//evpe(EVPE_ENABLE);
+}
+
+void vsmp_resume(void)
+{
+	//dvpe();
+	vsmp_smp_setup();
+	//smp_prepare_cpus(2);
+	vsmp_smp_finish();
+	
+	//mips_mt_regdump(dvpe());
+	//evpe(EVPE_ENABLE);
+}
+
+void play_dead(void)
+{
+	idle_task_exit();
+	while (1)	/* core will be reset here */
+	    ;
+}
+#endif
 
 struct plat_smp_ops vsmp_smp_ops = {
 	.send_ipi_single	= vsmp_send_ipi_single,
@@ -287,6 +411,10 @@ struct plat_smp_ops vsmp_smp_ops = {
 	.boot_secondary		= vsmp_boot_secondary,
 	.smp_setup		= vsmp_smp_setup,
 	.prepare_cpus		= vsmp_prepare_cpus,
+#ifdef CONFIG_HOTPLUG_CPU
+	.cpu_disable		= vsmp_cpu_disable,
+	.cpu_die		= vsmp_cpu_die,
+#endif
 };
 
 #ifdef CONFIG_PROC_FS
