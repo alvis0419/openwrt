@@ -59,29 +59,15 @@ void r4k_wait(void)
  * interrupt is requested" restriction in the MIPS32/MIPS64 architecture makes
  * using this version a gamble.
  */
-void __log(unsigned char c);
 void r4k_wait_irqoff(void)
 {
-	int cpu = smp_processor_id();
-    if(cpu==1) {
-        local_irq_enable();
-        if(*(volatile unsigned long *)0xa0000080)
-        {
-        __log('F');
-        }
- //       if(0==(counter%10000))
-   //    printk("1");
-    }
-    else
-    {
-        if (!need_resched())
-            __asm__(
-            "	.set	push		\n"
-            "	.set	arch=r4000	\n"
-            "	wait			\n"
-            "	.set	pop		\n");
-        local_irq_enable();
-    }
+	if (!need_resched())
+		__asm__(
+		"	.set	push		\n"
+		"	.set	arch=r4000	\n"
+		"	wait			\n"
+		"	.set	pop		\n");
+	local_irq_enable();
 }
 
 /*

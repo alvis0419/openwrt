@@ -70,7 +70,6 @@ static void cpu_stop_signal_done(struct cpu_stop_done *done, bool executed)
 	}
 }
 
-void __log(unsigned char c);
 /* queue @work to @stopper.  if offline, @work is completed immediately */
 static void cpu_stop_queue_work(unsigned int cpu, struct cpu_stop_work *work)
 {
@@ -80,17 +79,12 @@ static void cpu_stop_queue_work(unsigned int cpu, struct cpu_stop_work *work)
 	unsigned long flags;
 
 	spin_lock_irqsave(&stopper->lock, flags);
-__log('A');
+
 	if (stopper->enabled) {
-__log('B');
 		list_add_tail(&work->list, &stopper->works);
 		wake_up_process(p);
 	} else
-        {
-__log('C');
-            cpu_stop_signal_done(work->done, false);
-__log('D');
-        }
+		cpu_stop_signal_done(work->done, false);
 
 	spin_unlock_irqrestore(&stopper->lock, flags);
 }
@@ -151,7 +145,7 @@ struct multi_stop_data {
 	unsigned int		num_threads;
 	const struct cpumask	*active_cpus;
 
-	volatile enum multi_stop_state	state;
+	enum multi_stop_state	state;
 	atomic_t		thread_ack;
 };
 
@@ -170,9 +164,7 @@ static void ack_state(struct multi_stop_data *msdata)
 	if (atomic_dec_and_test(&msdata->thread_ack))
 		set_state(msdata, msdata->state + 1);
 }
-static int cpu_stop_should_run(unsigned int cpu);
-static void cpu_stop_unpark(unsigned int cpu);
-static void cpu_stop_create(unsigned int cpu);
+
 /* This is the cpu_stop function which stops the CPU. */
 static int multi_cpu_stop(void *data)
 {
@@ -181,10 +173,7 @@ static int multi_cpu_stop(void *data)
 	int cpu = smp_processor_id(), err = 0;
 	unsigned long flags;
 	bool is_active;
-    int counter = 0;
-    unsigned long val;
- //   struct task_struct *p;
-__log('J');
+
 	/*
 	 * When called from stop_machine_from_inactive_cpu(), irq might
 	 * already be disabled.  Save the state and restore it on exit.
@@ -195,24 +184,19 @@ __log('J');
 		is_active = cpu == cpumask_first(cpu_online_mask);
 	else
 		is_active = cpumask_test_cpu(cpu, msdata->active_cpus);
-__log('K');
+
 	/* Simple state machine */
 	do {
 		/* Chill out and ensure we re-read multi_stop_state. */
 		cpu_relax();
-        val = *(volatile unsigned long*) 0xbf005520;
 		if (msdata->state != curstate) {
 			curstate = msdata->state;
 			switch (curstate) {
-            case MULTI_STOP_DISABLE_IRQ:
-               // printk("====> multi_cpu_stop %d %d %d %d %d\n", cpu, is_active, curstate, msdata->state, msdata->thread_ack );
-__log('L');
+			case MULTI_STOP_DISABLE_IRQ:
 				local_irq_disable();
 				hard_irq_disable();
 				break;
-            case MULTI_STOP_RUN:
-               // printk("====> multi_cpu_stop %d %d %d %d %d\n", cpu, is_active, curstate, msdata->state, msdata->thread_ack );
-__log('M');
+			case MULTI_STOP_RUN:
 				if (is_active)
 					err = msdata->fn(msdata->data);
 				break;
@@ -221,24 +205,9 @@ __log('M');
 			}
 			ack_state(msdata);
 		}
-        if((counter++ % 10000)==0) {
-
-            {
-                #if 0
-                printk("(%d)\n", cpu_stop_should_run(1));
-                cpu_stop_unpark(1);
-                	p = per_cpu(cpu_stopper_task, 1);
-                        wake_up_process(p);
-                        #endif
-            }
-    //if(cpu==0) printk("0");
-    //if(cpu==1) printk("1");
-        }
-//printk("====> multi_cpu_stop %d %d %d %d %d\n", cpu, is_active, curstate, msdata->state, msdata->thread_ack );
 	} while (curstate != MULTI_STOP_EXIT);
-__log('N');
+
 	local_irq_restore(flags);
-__log('O');
 	return err;
 }
 
@@ -367,14 +336,10 @@ static void queue_stop_cpus_work(const struct cpumask *cpumask,
 
 	/* initialize works and done */
 	for_each_cpu(cpu, cpumask) {
-printk("queue_stop_cpus_work cpu %d\n", cpu);
-
 		work = &per_cpu(stop_cpus_work, cpu);
 		work->fn = fn;
 		work->arg = arg;
 		work->done = done;
-printk("queue_stop_cpus_work cpu %d %p\n", cpu, work);
-
 	}
 
 	/*
@@ -384,25 +349,18 @@ printk("queue_stop_cpus_work cpu %d %p\n", cpu, work);
 	 */
 	lg_global_lock(&stop_cpus_lock);
 	for_each_cpu(cpu, cpumask)
-    {
-printk("cpu_stop_queue_work cpu %d\n", cpu);
-        cpu_stop_queue_work(cpu, &per_cpu(stop_cpus_work, cpu));
-    }
+		cpu_stop_queue_work(cpu, &per_cpu(stop_cpus_work, cpu));
 	lg_global_unlock(&stop_cpus_lock);
 }
 
-void __log(unsigned char c);
 static int __stop_cpus(const struct cpumask *cpumask,
 		       cpu_stop_fn_t fn, void *arg)
 {
 	struct cpu_stop_done done;
 
 	cpu_stop_init_done(&done, cpumask_weight(cpumask));
-__log('a');
 	queue_stop_cpus_work(cpumask, fn, arg, &done);
-__log('b');
 	wait_for_completion(&done.completion);
-__log('c');
 	return done.executed ? done.ret : -ENOENT;
 }
 
@@ -440,11 +398,8 @@ int stop_cpus(const struct cpumask *cpumask, cpu_stop_fn_t fn, void *arg)
 
 	/* static works are used, process one request at a time */
 	mutex_lock(&stop_cpus_mutex);
-//printk("CPU%d stop_cpus ::1\n", smp_processor_id());
 	ret = __stop_cpus(cpumask, fn, arg);
 	mutex_unlock(&stop_cpus_mutex);
-
-//printk("CPU%d stop_cpus ::2\n", smp_processor_id());
 	return ret;
 }
 
@@ -487,10 +442,7 @@ static int cpu_stop_should_run(unsigned int cpu)
 	spin_lock_irqsave(&stopper->lock, flags);
 	run = !list_empty(&stopper->works);
 	spin_unlock_irqrestore(&stopper->lock, flags);
-
-    printk(" cpu_stop_should_run %d %d\n", cpu, run);
-
-    return run;
+	return run;
 }
 
 static void cpu_stopper_thread(unsigned int cpu)
@@ -499,30 +451,25 @@ static void cpu_stopper_thread(unsigned int cpu)
 	struct cpu_stop_work *work;
 	int ret;
 
-    printk("====> cpu_stopper_thread %d\n", cpu);
 repeat:
 	work = NULL;
-
-printk("====> cpu_stopper_thread sp %d\n", cpu);
 	spin_lock_irq(&stopper->lock);
 	if (!list_empty(&stopper->works)) {
-
-printk("====> cpu_stopper_thread %d work %p\n", cpu, work);
 		work = list_first_entry(&stopper->works,
 					struct cpu_stop_work, list);
 		list_del_init(&work->list);
 	}
 	spin_unlock_irq(&stopper->lock);
-printk("====> cpu_stopper_thread sp2 %d\n", cpu);
+
 	if (work) {
 		cpu_stop_fn_t fn = work->fn;
 		void *arg = work->arg;
 		struct cpu_stop_done *done = work->done;
 		char ksym_buf[KSYM_NAME_LEN] __maybe_unused;
-printk("====> cpu_stopper_thread sp3 %d\n", cpu);
+
 		/* cpu stop callbacks are not allowed to sleep */
 		preempt_disable();
-printk("====> cpu_stopper_thread %d exec work %p\n", cpu, work);
+
 		ret = fn(arg);
 		if (ret)
 			done->ret = ret;
@@ -533,12 +480,10 @@ printk("====> cpu_stopper_thread %d exec work %p\n", cpu, work);
 			  "cpu_stop: %s(%p) leaked preempt count\n",
 			  kallsyms_lookup((unsigned long)fn, NULL, NULL, NULL,
 					  ksym_buf), arg);
-printk("====> cpu_stopper_thread %d work %p done\n", cpu, work);
+
 		cpu_stop_signal_done(done, true);
 		goto repeat;
 	}
-
-    printk("====> cpu_stopper_thread exit %d\n", cpu);
 }
 
 extern void sched_set_stop_task(int cpu, struct task_struct *stop);
@@ -611,8 +556,6 @@ int __stop_machine(int (*fn)(void *), void *data, const struct cpumask *cpus)
 		.active_cpus = cpus,
 	};
 
-printk("CPU%d SSS ::1\n", smp_processor_id());
-printk("---->6.1 stop_machine_initialized %d\n", stop_machine_initialized);
 	if (!stop_machine_initialized) {
 		/*
 		 * Handle the case where stop_machine() is called
@@ -631,7 +574,7 @@ printk("---->6.1 stop_machine_initialized %d\n", stop_machine_initialized);
 
 		return ret;
 	}
-printk("---->6.2 stop_machine_initialized %d\n", stop_machine_initialized);
+
 	/* Set the initial state and stop all online cpus. */
 	set_state(&msdata, MULTI_STOP_PREPARE);
 	return stop_cpus(cpu_online_mask, multi_cpu_stop, &msdata);

@@ -346,15 +346,6 @@ static int __ref take_cpu_down(void *_param)
 	return 0;
 }
 
-void panther_serial_outc(unsigned char c);
-void __log(unsigned char c)
-{
-	//unsigned char cpu = (0x30 + smp_processor_id());
-
-	//panther_serial_outc(cpu);
-	panther_serial_outc(c);
-}
-
 /* Requires cpu_add_remove_lock to be held */
 static int __ref _cpu_down(unsigned int cpu, int tasks_frozen)
 {
@@ -374,7 +365,6 @@ static int __ref _cpu_down(unsigned int cpu, int tasks_frozen)
 
 	cpu_hotplug_begin();
 
-__log('1');
 	err = __cpu_notify(CPU_DOWN_PREPARE | mod, hcpu, -1, &nr_calls);
 	if (err) {
 		nr_calls--;
@@ -383,7 +373,7 @@ __log('1');
 			__func__, cpu);
 		goto out_release;
 	}
-__log('2');;
+
 	/*
 	 * By now we've cleared cpu_active_mask, wait for all preempt-disabled
 	 * and RCU users of this state to go away such that all new such users
@@ -398,29 +388,20 @@ __log('2');;
 	synchronize_sched();
 #endif
 	synchronize_rcu();
-__log('3');
-#if 0
-    stop_one_cpu(cpu, take_cpu_down, &tcd_param);
-#else
 
 	smpboot_park_threads(cpu);
-__log('4');
 
 	/*
 	 * So now all preempt/rcu users must observe !cpu_active().
 	 */
-__log('5');
+
 	err = __stop_machine(take_cpu_down, &tcd_param, cpumask_of(cpu));
 	if (err) {
-__log('6');
 		/* CPU didn't die: tell everyone.  Can't complain. */
 		smpboot_unpark_threads(cpu);
 		cpu_notify_nofail(CPU_DOWN_FAILED | mod, hcpu);
 		goto out_release;
 	}
-#endif
-__log('7');
-
 	BUG_ON(cpu_online(cpu));
 
 	/*
