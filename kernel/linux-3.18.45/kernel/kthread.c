@@ -424,6 +424,7 @@ void kthread_unpark(struct task_struct *k)
  * Returns 0 if the thread is parked, -ENOSYS if the thread exited.
  * If called by the kthread itself just the park bit is set.
  */
+void __log(unsigned char c);
 int kthread_park(struct task_struct *k)
 {
 	struct kthread *kthread = to_live_kthread(k);
@@ -434,7 +435,9 @@ int kthread_park(struct task_struct *k)
 			set_bit(KTHREAD_SHOULD_PARK, &kthread->flags);
 			if (k != current) {
 				wake_up_process(k);
+__log('X');
 				wait_for_completion(&kthread->parked);
+__log('Y');
 			}
 		}
 		ret = 0;

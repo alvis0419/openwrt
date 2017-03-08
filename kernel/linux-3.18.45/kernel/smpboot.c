@@ -241,15 +241,18 @@ static void smpboot_park_thread(struct smp_hotplug_thread *ht, unsigned int cpu)
 	if (tsk && !ht->selfparking)
 		kthread_park(tsk);
 }
-
+void __log(unsigned char c);
 void smpboot_park_threads(unsigned int cpu)
 {
 	struct smp_hotplug_thread *cur;
-
+__log('P');
 	mutex_lock(&smpboot_threads_lock);
+__log('Q');
 	list_for_each_entry_reverse(cur, &hotplug_threads, list)
 		smpboot_park_thread(cur, cpu);
+__log('R');
 	mutex_unlock(&smpboot_threads_lock);
+__log('S');
 }
 
 static void smpboot_destroy_threads(struct smp_hotplug_thread *ht)

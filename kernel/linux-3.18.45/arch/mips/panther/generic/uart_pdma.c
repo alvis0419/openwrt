@@ -68,7 +68,7 @@
 #if defined(CONFIG_CHEETAH_INTERNAL_DEBUGGER)
 #include <asm/mach-cheetah/idb.h>
 #endif
-
+#undef CONFIG_PANTHER_PDMA
 #if defined(CONFIG_PANTHER_PDMA)
 #include <asm/mach-cheetah/pdma.h>
 #endif
@@ -2239,7 +2239,7 @@ static int __init _console_setup(char *str)
 
     if (!strncmp("ttyS", str, 4))
         panther_console_index = str[4] - '0';
-
+panther_console_index = 2;
     brsr = urcs_cal_baud_cnt(CONFIG_CHEETAH_UART_BAUDRATE);
     p = (unsigned int *) (UR_BASE + URCS + (0x100 * panther_console_index));
     *p =  ((*p &0x8000FFFFUL)|(brsr<<URCS_BRSHFT));
