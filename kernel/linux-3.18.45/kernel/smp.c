@@ -228,7 +228,7 @@ static void flush_smp_call_function_queue(bool warn_cpu_offline)
 	struct call_single_data *csd, *csd_next;
 	static bool warned;
 
-	WARN_ON(!irqs_disabled());
+	//WARN_ON(!irqs_disabled());
 
 	head = this_cpu_ptr(&call_single_queue);
 	entry = llist_del_all(head);
@@ -557,7 +557,10 @@ void __init smp_init(void)
 		if (num_online_cpus() >= setup_max_cpus)
 			break;
 		if (!cpu_online(cpu))
-			cpu_up(cpu);
+        {
+        printk("Not online %d\n", cpu);
+		//	cpu_up(cpu);
+        }
 	}
 
 	/* Any cleanup work */

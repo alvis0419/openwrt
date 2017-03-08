@@ -133,7 +133,6 @@ static void irq_work_run_list(struct llist_head *list)
 	struct llist_node *llnode;
 
 	//BUG_ON(!irqs_disabled());
-	WARN_ON(!irqs_disabled());
 	if (llist_empty(list))
 		return;
 

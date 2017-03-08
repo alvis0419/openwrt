@@ -1982,8 +1982,8 @@ config MIPS_MT_SMP
 	select MIPS_MT
 	select SMP
 	select SYS_SUPPORTS_SMP
-	select SYS_SUPPORTS_SCHED_SMT
-	#select MIPS_PERF_SHARED_TC_COUNTERS
+	#select SYS_SUPPORTS_SCHED_SMT
+	select MIPS_PERF_SHARED_TC_COUNTERS
 	help
 	  This is a kernel model which is known as SMVP. This is supported
 	  on cores with the MT ASE and uses the available VPEs to implement
